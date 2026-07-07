@@ -1,38 +1,33 @@
 // Proves titleTemplate back-compat: the package must parse rouge's REAL,
 // already-published release files unchanged when configured with
 // productName="Angel Snack" (the plan's refinement #5 / risk #1 fix).
+//
+// The files are byte-frozen under fixtures/rouge-frozen/releases/ (captured from
+// rouge@8f733623b), so this runs hermetically in CI. Broader
+// validateReleaseState / collectChangedFiles coverage lives in the golden
+// parity test, which drives the frozen rouge scripts end-to-end.
 
 import { describe, expect, test } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseReleaseSummary } from '../render';
-import { validateReleaseState } from '../publish';
-import { collectChangedFiles } from '../hygiene';
 import { makeRougeConfig } from './fixtures/rougeConfig';
 
-const ROUGE_ROOT = path.resolve(__dirname, '../../../rouge');
-const ROUGE_RELEASES_DIR = path.join(ROUGE_ROOT, 'docs', 'patch-notes', 'releases');
+const FROZEN_ROOT = path.resolve(__dirname, 'fixtures/rouge-frozen');
+const RELEASES_DIR = path.join(FROZEN_ROOT, 'releases');
 
-const rougeCheckoutExists = fs.existsSync(ROUGE_RELEASES_DIR);
-const describeIfRouge = rougeCheckoutExists ? describe : describe.skip;
+const releaseFiles = fs
+  .readdirSync(RELEASES_DIR)
+  .filter((fileName) => fileName.endsWith('.md') && fileName !== 'README.md');
 
-describeIfRouge('parses rouge real published release files (titleTemplate back-compat)', () => {
-  // NOTE: a `describe.skip` block still EXECUTES its callback body at collection
-  // time (only the tests are skipped), so this readdir must be guarded — it runs
-  // even in CI where the rouge checkout is absent.
-  const releaseFiles = rougeCheckoutExists
-    ? fs
-        .readdirSync(ROUGE_RELEASES_DIR)
-        .filter((fileName) => fileName.endsWith('.md') && fileName !== 'README.md')
-    : [];
-
-  test('finds at least one real release file to check against', () => {
+describe('parses rouge real published release files (titleTemplate back-compat)', () => {
+  test('finds real release files to check against', () => {
     expect(releaseFiles.length).toBeGreaterThan(0);
   });
 
   test.each(releaseFiles)('parses %s with the exact title anchor rouge published', (fileName) => {
-    const config = makeRougeConfig(ROUGE_ROOT);
-    const summary = parseReleaseSummary(config, path.join(ROUGE_RELEASES_DIR, fileName));
+    const config = makeRougeConfig(FROZEN_ROOT);
+    const summary = parseReleaseSummary(config, path.join(RELEASES_DIR, fileName));
     const expectedVersion = fileName.replace(/\.md$/, '');
 
     // The title-anchored version must be recovered exactly — this is the
@@ -42,21 +37,5 @@ describeIfRouge('parses rouge real published release files (titleTemplate back-c
     expect(summary.stage.toLowerCase()).toBe('alpha');
     expect(summary.packageVersion).toBe(expectedVersion);
     expect(summary.date).not.toBe('');
-  });
-
-  test('validateReleaseState runs clean against rouge real working tree metadata', () => {
-    const config = makeRougeConfig(ROUGE_ROOT);
-    const pkg = JSON.parse(fs.readFileSync(path.join(ROUGE_ROOT, 'package.json'), 'utf8')) as { version: string };
-    const validation = validateReleaseState(config, pkg.version);
-    expect(validation.version).toBe(pkg.version);
-    expect(validation.errors).toEqual([]);
-    expect(validation.ok).toBe(true);
-  });
-
-  test('collectChangedFiles runs against the real rouge git repo without throwing', () => {
-    // Smoke-tests the generic git collector (merge-base + diff + untracked)
-    // against a real, non-fixture repository. We do not assert on the
-    // (working-tree-dependent) result, only that it behaves.
-    expect(() => collectChangedFiles(ROUGE_ROOT, 'HEAD')).not.toThrow();
   });
 });

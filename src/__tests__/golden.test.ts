@@ -10,9 +10,11 @@
 // file (release notes, archive, PATCH_NOTES.md index, package.json,
 // package-lock.json) is diffed byte-for-byte between the two trees.
 //
-// This is a REAL rouge-script invocation (not a captured/committed golden
-// fixture) — skipped automatically if a rouge checkout isn't present at
-// ../../../rouge (see ROUGE_ROOT below).
+// The rouge scripts are byte-frozen under src/__tests__/fixtures/rouge-frozen/
+// (captured from rouge@8f733623b, the commit before rouge adopted this
+// package), so the parity check is HERMETIC: it needs no external checkout,
+// runs in CI, and never goes circular now that the live rouge scripts are thin
+// wrappers over release-kit. Re-freeze only to intentionally re-baseline.
 
 import { describe, expect, test, beforeAll } from 'vitest';
 import fs from 'node:fs';
@@ -23,9 +25,7 @@ import { execFileSync } from 'node:child_process';
 import { run as runCli } from '../cli';
 import { makeRougeConfig } from './fixtures/rougeConfig';
 
-const ROUGE_ROOT = path.resolve(__dirname, '../../../rouge');
-const rougeCheckoutExists = fs.existsSync(path.join(ROUGE_ROOT, 'scripts', 'cut-release.js'));
-const describeIfRouge = rougeCheckoutExists ? describe : describe.skip;
+const ROUGE_ROOT = path.resolve(__dirname, 'fixtures/rouge-frozen');
 
 const requireFromHere = createRequire(import.meta.url);
 
@@ -34,7 +34,8 @@ interface RougeCliModule {
 }
 
 function loadRougeScript(relativePath: string): RougeCliModule {
-  // Absolute require against the REAL rouge checkout — not a copy.
+  // Require against the byte-frozen rouge scripts (self-contained, node-builtins
+  // only), so no rouge checkout or node_modules is needed.
   return requireFromHere(path.join(ROUGE_ROOT, 'scripts', relativePath)) as RougeCliModule;
 }
 
@@ -122,7 +123,7 @@ function assertTreesIdentical(rougeDir: string, kitDir: string, relPaths: string
 
 const TREE_PATHS = ['docs', 'package.json', 'package-lock.json'];
 
-describeIfRouge('golden parity: release-kit vs rouge real scripts', () => {
+describe('golden parity: release-kit vs rouge real scripts', () => {
   let rougeDir: string;
   let kitDir: string;
   let cutRelease: RougeCliModule;
