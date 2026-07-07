@@ -1,0 +1,32 @@
+{
+  "name": "@andrewpopov/release-kit",
+  "version": "0.1.0",
+  "description": "Reusable release/patch-note toolkit: alpha-semver versioning, fragment-based patch notes, release cut/publish/validate, and release-hygiene enforcement. Consumers inject all policy (paths, kinds, wording) via a small config.",
+  "author": "Andrew Popov",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "release-kit": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "verify:pack": "node scripts/verify-pack.mjs"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.1.0"
+  }
+}
