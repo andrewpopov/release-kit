@@ -17,9 +17,14 @@ const rougeCheckoutExists = fs.existsSync(ROUGE_RELEASES_DIR);
 const describeIfRouge = rougeCheckoutExists ? describe : describe.skip;
 
 describeIfRouge('parses rouge real published release files (titleTemplate back-compat)', () => {
-  const releaseFiles = fs
-    .readdirSync(ROUGE_RELEASES_DIR)
-    .filter((fileName) => fileName.endsWith('.md') && fileName !== 'README.md');
+  // NOTE: a `describe.skip` block still EXECUTES its callback body at collection
+  // time (only the tests are skipped), so this readdir must be guarded — it runs
+  // even in CI where the rouge checkout is absent.
+  const releaseFiles = rougeCheckoutExists
+    ? fs
+        .readdirSync(ROUGE_RELEASES_DIR)
+        .filter((fileName) => fileName.endsWith('.md') && fileName !== 'README.md')
+    : [];
 
   test('finds at least one real release file to check against', () => {
     expect(releaseFiles.length).toBeGreaterThan(0);
