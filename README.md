@@ -1,19 +1,21 @@
 # @andrewpopov/release-kit
 
-A reusable release/patch-note toolkit: alpha-semver versioning, fragment-based
-patch notes, a one-command release cut (bump → publish → validate), and a
-release-hygiene check that enforces "release-relevant changes need a
-patch-note artifact." The package owns the **mechanics**; each consuming
-service supplies its own **policy** (paths, valid kinds, wording, version
-strategy, version-manifest adapter) via a small `ReleaseKitConfig`.
+A reusable release/patch-note toolkit for Node.js projects. You describe
+each change as a small markdown fragment with front-matter; release-kit
+compiles the fragments into versioned release notes, bumps the version,
+maintains an index, and enforces via a release-hygiene check that
+release-relevant code changes ship with a patch-note artifact. The package
+owns the **mechanics**; each consuming project supplies its own **policy**
+(paths, valid kinds, wording, version strategy, version-manifest adapter)
+via a small `ReleaseKitConfig`. It has **zero runtime dependencies**:
+front-matter parsing and alpha-semver math are hand-rolled.
 
-Extracted from [rouge](https://github.com/andrewpopov/rouge)'s release
-tooling (`scripts/lib/release-notes-core.js`, `cut-release.js`,
-`check-release-hygiene.js`, `release-notes.js`) — see
-`docs/ops/REUSABLE_VERSIONING_SYSTEM.md` in that repo for the design
-rationale. This package has **zero runtime dependencies**: front-matter
-parsing and alpha-semver math are hand-rolled, matching rouge's original
-tooling.
+Extracted from the release tooling of
+[rouge](https://github.com/andrewpopov/rouge), a game project whose scripts
+(`scripts/lib/release-notes-core.js`, `cut-release.js`,
+`check-release-hygiene.js`, `release-notes.js`) this package generalizes —
+see `docs/ops/REUSABLE_VERSIONING_SYSTEM.md` in that repo for the design
+rationale.
 
 ## Install
 
@@ -84,7 +86,7 @@ Wire repo scripts around the CLI:
 
 ## CLI
 
-Seven verbs, matching rouge's original npm scripts:
+Seven verbs:
 
 ```bash
 release-kit note --kind feature --slug town-flow --summary "Town flow polish"
@@ -135,15 +137,15 @@ docs/
 `archive/<version>/`, deletes them from `unreleased/`, refreshes the index,
 and validates the result.
 
-**v0.1.0 is STRICT PARITY with rouge's current behavior**: the cut order
-(bump → publish → validate) has no transactional rollback — a mid-publish
-throw can leave the manifest bumped with fragments partially archived, same
-as rouge today. Snapshot/rollback hardening is planned for a v0.1.1 release
-and will not change the happy-path output.
+**v0.1.0 is a STRICT-PARITY port of the original rouge tooling**: the cut
+order (bump → publish → validate) has no transactional rollback — a
+mid-publish throw can leave the manifest bumped with fragments partially
+archived. Snapshot/rollback hardening is planned for a v0.1.1 release and
+will not change the happy-path output.
 
 ## The config seam (`ReleaseKitConfig`)
 
-Every rouge-coupled detail (product name, paths, valid kinds, hygiene
+Every product-specific detail (product name, paths, valid kinds, hygiene
 classification lists, title/intro wording, version strategy, manifest
 adapter) is config. The mechanics — fragment parsing, rendering, publish
 ordering, git-diff collection — are generic.
@@ -151,8 +153,9 @@ ordering, git-diff collection — are generic.
 The release-note **title line** is a single template string (e.g.
 `"# {productName} {version} Patch Notes"`) that drives BOTH the renderer and
 the historical-file parser (via a regex built from the same template), so
-they can never drift apart — a package configured with `productName:"Angel
-Snack"` parses rouge's real historical release files unchanged.
+they can never drift apart — the test suite proves a package configured
+with `productName: "Angel Snack"` parses rouge's real historical release
+files unchanged.
 
 ### `VersionStrategy`
 
@@ -207,33 +210,33 @@ unmodified scripts.
 
 ## Scope (v0.1.0)
 
-Everything rouge's 3 release scripts do EXCEPT the Discord notifier
+Everything the three original release scripts do EXCEPT a Discord notifier
 (`release-kit announce discord ...`), which is planned for v0.2.0 after cut
-behavior is stable elsewhere. Rouge keeps its Discord bot, public
-patch-notes site generator, and deploy-counter scripts — those are
-rouge-specific and not extracted.
+behavior is stable elsewhere. The source project's Discord bot, public
+patch-notes site generator, and deploy-counter scripts are product-specific
+and were deliberately not extracted.
 
 ## Known limitations & planned hardening (v0.1.x)
 
-v0.1.0 is a deliberately **strict-parity** extraction — it reproduces rouge's
-behavior exactly (proven by a byte-diff golden test against rouge's real
-scripts), including a few rough edges that are faithfully preserved rather
-than "fixed" mid-extraction. These are slated for a hardening pass that will
-not change happy-path output:
+v0.1.0 is a deliberately **strict-parity** extraction — it reproduces the
+original tooling's behavior exactly (proven by a byte-diff golden test
+against rouge's real, unmodified scripts), including a few rough edges that
+are faithfully preserved rather than "fixed" mid-extraction. These are
+slated for a hardening pass that will not change happy-path output:
 
 - **Non-transactional cut** — a mid-publish failure can leave a half-bumped
-  state (as in rouge). → snapshot/rollback.
+  state (inherited). → snapshot/rollback.
 - **`bump --version <v>` does not validate** the explicit version against the
-  strategy (as in rouge), so an out-of-scheme value can be written. → assert.
+  strategy (inherited), so an out-of-scheme value can be written. → assert.
 - **Optional-lockfile mode can mask a typo'd `lockFileName`** — a configured
   lockfile path that doesn't exist is silently skipped. → a `requireLockfile`
   option.
-- **Hygiene swallows git/base-ref failures** (as in rouge): an unreachable
+- **Hygiene swallows git/base-ref failures** (inherited): an unreachable
   `baseRef` (e.g. a shallow CI checkout) yields an empty changed-file set and
   can pass falsely. → surface base-ref resolution errors.
 - **Release-note metadata labels are format-fixed** (`Release date:`,
   `Stage:`, `Package version:`, and the `# {productName} Patch Notes` index
-  heading). Configurable when a non-rouge consumer needs different wording.
+  heading). Configurable when a consumer needs different wording.
 
 ## License
 
