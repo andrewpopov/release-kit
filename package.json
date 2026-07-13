@@ -24,10 +24,9 @@
     "verify:pack": "node scripts/verify-pack.mjs",
     "verify": "npm run typecheck && npm test && npm run build && npm run verify:pack && npm audit --omit=dev --audit-level=high"
   },
-  "dependencies": {},
   "devDependencies": {
     "@types/node": "^20.14.0",
     "typescript": "^5.5.0",
-    "vitest": "^2.1.0"
+    "vitest": "^4.1.10"
   }
 }

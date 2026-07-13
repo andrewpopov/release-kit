@@ -22,6 +22,7 @@ CHANGELOG entry.
 - Validate explicit `bumpVersion` inputs through the configured
   `VersionStrategy` before changing a manifest.
 - Add `npm run verify` for the local release gate.
+- Upgrade the Vitest development toolchain to a version with no known advisories.
 
 ## 0.1.0
 
