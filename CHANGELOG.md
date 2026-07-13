@@ -19,6 +19,7 @@ CHANGELOG entry.
 
 ## 0.1.1
 
+- Add public contribution, support, and private vulnerability-reporting policies.
 - Validate explicit `bumpVersion` inputs through the configured
   `VersionStrategy` before changing a manifest.
 - Add `npm run verify` for the local release gate.

@@ -4,6 +4,9 @@
   "description": "Reusable release/patch-note toolkit: alpha-semver versioning, fragment-based patch notes, release cut/publish/validate, and release-hygiene enforcement. Consumers inject all policy (paths, kinds, wording) via a small config.",
   "author": "Andrew Popov",
   "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/andrewpopov/release-kit.git" },
+  "bugs": { "url": "https://github.com/andrewpopov/release-kit/issues" },
+  "homepage": "https://github.com/andrewpopov/release-kit#readme",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {

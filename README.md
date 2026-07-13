@@ -247,3 +247,8 @@ MIT © Andrew Popov
 npm ci
 npm run verify
 ```
+
+## Project policies
+
+See [Contributing](./CONTRIBUTING.md), [Support](./SUPPORT.md), and the
+[Security Policy](./SECURITY.md). This package is licensed under [MIT](./LICENSE).
