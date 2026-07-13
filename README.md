@@ -241,3 +241,9 @@ slated for a hardening pass that will not change happy-path output:
 ## License
 
 MIT © Andrew Popov
+## Verify locally
+
+```bash
+npm ci
+npm run verify
+```

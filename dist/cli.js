@@ -150,7 +150,7 @@ function run(argv = process.argv.slice(2), stdout = process.stdout, stderr = pro
                 version,
                 date: parsed.date || (0, fragments_1.todayIso)(),
                 fragments: (0, fragments_1.collectFragments)(config),
-                commit: (0, publish_1.getGitShortSha)(rootDir),
+                commit: parsed.commit || (0, publish_1.getGitShortSha)(rootDir),
             }));
             return 0;
         }
