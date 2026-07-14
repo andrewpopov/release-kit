@@ -241,3 +241,14 @@ slated for a hardening pass that will not change happy-path output:
 ## License
 
 MIT © Andrew Popov
+## Verify locally
+
+```bash
+npm ci
+npm run verify
+```
+
+## Project policies
+
+See [Contributing](./CONTRIBUTING.md), [Support](./SUPPORT.md), and the
+[Security Policy](./SECURITY.md). This package is licensed under [MIT](./LICENSE).

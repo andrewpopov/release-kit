@@ -67,6 +67,7 @@ export function bumpVersion(config: ReleaseKitConfig, options: BumpVersionOption
   const rootDir = path.resolve(config.rootDir);
   const previousVersion = config.manifest.readVersion(rootDir);
   const version = String(options.version || config.versionStrategy.next(previousVersion)).trim();
+  config.versionStrategy.assert(version);
   config.manifest.writeVersion(rootDir, version);
   return { previousVersion, version };
 }

@@ -4,7 +4,7 @@ import { describe, expect, test } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { cutRelease } from '../publish';
+import { bumpVersion, cutRelease } from '../publish';
 import { validateReleaseState } from '../publish';
 import { makeRougeConfig } from './fixtures/rougeConfig';
 
@@ -76,6 +76,18 @@ function writeFragment(rootDir: string): void {
 }
 
 describe('release-cut (ported from rouge)', () => {
+  test('bumpVersion rejects an invalid explicit version before mutating either manifest', () => {
+    const rootDir = makeFixtureRoot();
+    try {
+      const config = makeRougeConfig(rootDir);
+      expect(() => bumpVersion(config, { version: 'not-a-release' })).toThrow(/alpha semver/);
+      expect(JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8')).version).toBe('0.1.0-alpha.0');
+      expect(JSON.parse(fs.readFileSync(path.join(rootDir, 'package-lock.json'), 'utf8')).version).toBe('0.1.0-alpha.0');
+    } finally {
+      fs.rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
   test('cutRelease bumps, publishes, archives, and validates the next alpha', () => {
     const rootDir = makeFixtureRoot();
     try {

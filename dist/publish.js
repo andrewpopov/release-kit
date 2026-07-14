@@ -64,6 +64,7 @@ function bumpVersion(config, options = {}) {
     const rootDir = node_path_1.default.resolve(config.rootDir);
     const previousVersion = config.manifest.readVersion(rootDir);
     const version = String(options.version || config.versionStrategy.next(previousVersion)).trim();
+    config.versionStrategy.assert(version);
     config.manifest.writeVersion(rootDir, version);
     return { previousVersion, version };
 }

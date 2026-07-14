@@ -17,6 +17,14 @@ CHANGELOG entry.
 
 ---
 
+## 0.1.1
+
+- Add public contribution, support, and private vulnerability-reporting policies.
+- Validate explicit `bumpVersion` inputs through the configured
+  `VersionStrategy` before changing a manifest.
+- Add `npm run verify` for the local release gate.
+- Upgrade the Vitest development toolchain to a version with no known advisories.
+
 ## 0.1.0
 
 Initial release. Extracted from rouge's release/patch-note tooling

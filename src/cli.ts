@@ -188,7 +188,7 @@ export function run(
           version,
           date: parsed.date || todayIso(),
           fragments: collectFragments(config),
-          commit: getGitShortSha(rootDir),
+          commit: parsed.commit || getGitShortSha(rootDir),
         }),
       );
       return 0;

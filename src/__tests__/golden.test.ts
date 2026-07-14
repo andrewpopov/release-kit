@@ -244,11 +244,21 @@ describe('golden parity: release-kit vs rouge real scripts', () => {
 
   test('notes (preview): rendered release note is byte-identical', () => {
     const rougeResult = runRouge(releaseNotes, ['--date', '2026-07-04', '--commit', 'abc1234', '--root', rougeDir]);
-    const kitResult = runKit(['notes', '--date', '2026-07-04', '--commit', 'abc1234']);
+    const commit = rougeResult.stdout.match(/^Commit: (.+)$/m)?.[1];
+    if (!commit) throw new Error('Rouge preview did not render a commit');
+    // Rouge itself ignores --commit for preview and reads its own worktree HEAD.
+    // Feed that rendered value to release-kit so this parity assertion compares
+    // the release-note format, not two unrelated fixture repositories' HEADs.
+    const kitResult = runKit(['notes', '--date', '2026-07-04', '--commit', commit]);
     expect(kitResult.stdout).toBe(rougeResult.stdout);
     expect(kitResult.stderr).toBe(rougeResult.stderr);
     expect(kitResult.code).toBe(rougeResult.code);
     expect(kitResult.thrown).toBe(rougeResult.thrown);
+  });
+
+  test('notes uses an explicit commit rather than reading each worktree HEAD', () => {
+    const result = runKit(['notes', '--date', '2026-07-04', '--commit', 'pinned-sha']);
+    expect(result.stdout).toContain('Commit: pinned-sha');
   });
 
   test('cut: stdout, release file, archive, index, package.json/lock all byte-identical', () => {
