@@ -17,6 +17,11 @@ CHANGELOG entry.
 
 ---
 
+## 0.1.2
+
+- Publish `ReleaseArtifactV1` and the validation-gated JSON output introduced
+  after the original v0.1.1 tag.
+
 ## 0.1.1
 
 - Add public contribution, support, and private vulnerability-reporting policies.
