@@ -36,6 +36,20 @@ export interface PublishReleaseResult {
     releasePath: string;
     fragmentCount: number;
 }
+export interface ReleaseArtifactV1 {
+    schemaVersion: 1;
+    product: string;
+    repository: string;
+    version: string;
+    commit: string;
+    date: string;
+    renderedNotes: string;
+    notesDigest: string;
+    artifactRef: string;
+    fragmentCount: number;
+}
+/** Build a deterministic, transport-neutral descriptor only after validation succeeds. */
+export declare function createReleaseArtifactV1(config: ReleaseKitConfig, result: PublishReleaseResult, commit?: string): ReleaseArtifactV1;
 export declare function publishRelease(config: ReleaseKitConfig, options?: PublishReleaseOptions): PublishReleaseResult;
 export interface ValidateReleaseStateResult {
     ok: boolean;

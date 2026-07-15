@@ -17,12 +17,14 @@ exports.getGitShortSha = getGitShortSha;
 exports.bumpVersion = bumpVersion;
 exports.listReleaseSummaries = listReleaseSummaries;
 exports.updatePatchNotesIndex = updatePatchNotesIndex;
+exports.createReleaseArtifactV1 = createReleaseArtifactV1;
 exports.publishRelease = publishRelease;
 exports.validateReleaseState = validateReleaseState;
 exports.cutRelease = cutRelease;
 const node_fs_1 = __importDefault(require("node:fs"));
 const node_path_1 = __importDefault(require("node:path"));
 const node_child_process_1 = require("node:child_process");
+const node_crypto_1 = require("node:crypto");
 const config_1 = require("./config");
 const fragments_1 = require("./fragments");
 const render_1 = require("./render");
@@ -84,6 +86,19 @@ function updatePatchNotesIndex(config, version) {
     const { indexPath } = (0, config_1.resolvePaths)(config);
     node_fs_1.default.mkdirSync(node_path_1.default.dirname(indexPath), { recursive: true });
     node_fs_1.default.writeFileSync(indexPath, (0, render_1.renderPatchNotesIndex)(config, listReleaseSummaries(config), version), 'utf8');
+}
+/** Build a deterministic, transport-neutral descriptor only after validation succeeds. */
+function createReleaseArtifactV1(config, result, commit = '') {
+    const validation = validateReleaseState(config, result.version);
+    if (!validation.ok)
+        throw new Error(`Release ${result.version} is not validated: ${validation.errors.join('; ')}`);
+    const rootDir = node_path_1.default.resolve(config.rootDir);
+    const renderedNotes = node_fs_1.default.readFileSync(result.releasePath, 'utf8');
+    const manifest = JSON.parse(node_fs_1.default.readFileSync(node_path_1.default.join(rootDir, 'package.json'), 'utf8'));
+    const repository = typeof manifest.repository === 'string' ? manifest.repository : manifest.repository?.url ?? rootDir;
+    return Object.freeze({ schemaVersion: 1, product: manifest.name ?? node_path_1.default.basename(rootDir), repository, version: result.version,
+        commit: commit || getGitShortSha(rootDir), date: (0, render_1.parseReleaseSummary)(config, result.releasePath).date, renderedNotes,
+        notesDigest: (0, node_crypto_1.createHash)('sha256').update(renderedNotes).digest('hex'), artifactRef: node_path_1.default.relative(rootDir, result.releasePath), fragmentCount: result.fragmentCount });
 }
 function publishRelease(config, options = {}) {
     const version = resolveVersion(config, options.version);

@@ -17,6 +17,7 @@ interface ParsedArgs {
     force: boolean;
     allowEmpty: boolean;
     help: boolean;
+    json: boolean;
 }
 export declare function parseArgs(argv: string[]): ParsedArgs;
 export interface CliRunOptions {

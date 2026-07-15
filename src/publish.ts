@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import type { ReleaseKitConfig } from './config';
 import { releaseLinkPath, resolvePaths } from './config';
 import type { Fragment } from './fragments';
@@ -103,6 +104,24 @@ export interface PublishReleaseResult {
   version: string;
   releasePath: string;
   fragmentCount: number;
+}
+
+export interface ReleaseArtifactV1 {
+  schemaVersion: 1; product: string; repository: string; version: string; commit: string; date: string;
+  renderedNotes: string; notesDigest: string; artifactRef: string; fragmentCount: number;
+}
+
+/** Build a deterministic, transport-neutral descriptor only after validation succeeds. */
+export function createReleaseArtifactV1(config: ReleaseKitConfig, result: PublishReleaseResult, commit = ''): ReleaseArtifactV1 {
+  const validation = validateReleaseState(config, result.version);
+  if (!validation.ok) throw new Error(`Release ${result.version} is not validated: ${validation.errors.join('; ')}`);
+  const rootDir = path.resolve(config.rootDir);
+  const renderedNotes = fs.readFileSync(result.releasePath, 'utf8');
+  const manifest = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8')) as { name?: string; repository?: string | { url?: string } };
+  const repository = typeof manifest.repository === 'string' ? manifest.repository : manifest.repository?.url ?? rootDir;
+  return Object.freeze({ schemaVersion: 1, product: manifest.name ?? path.basename(rootDir), repository, version: result.version,
+    commit: commit || getGitShortSha(rootDir), date: parseReleaseSummary(config, result.releasePath).date, renderedNotes,
+    notesDigest: createHash('sha256').update(renderedNotes).digest('hex'), artifactRef: path.relative(rootDir, result.releasePath), fragmentCount: result.fragmentCount });
 }
 
 export function publishRelease(config: ReleaseKitConfig, options: PublishReleaseOptions = {}): PublishReleaseResult {

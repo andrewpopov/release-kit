@@ -13,6 +13,7 @@ import { renderReleaseNote } from './render';
 import {
   bumpVersion,
   cutRelease,
+  createReleaseArtifactV1,
   getGitShortSha,
   publishRelease,
   resolveVersion,
@@ -32,6 +33,7 @@ interface ParsedArgs {
   force: boolean;
   allowEmpty: boolean;
   help: boolean;
+  json: boolean;
 }
 
 const VALUE_FLAGS = new Set(['--root', '--version', '--date', '--kind', '--slug', '--summary', '--commit', '--base']);
@@ -62,6 +64,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     force: false,
     allowEmpty: false,
     help: false,
+    json: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -77,6 +80,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
       parsed.force = true;
     } else if (arg === '--allow-empty') {
       parsed.allowEmpty = true;
+    } else if (arg === '--json') {
+      parsed.json = true;
     } else if (!parsed.verb && !arg.startsWith('-')) {
       parsed.verb = arg;
     } else {
@@ -126,6 +131,7 @@ function writeHelp(stream: NodeJS.WritableStream): void {
       '  --base <ref>       Base ref to diff against (for `hygiene`)',
       '  --force            Overwrite an existing release file',
       '  --allow-empty      Allow publishing/cutting with no fragments',
+      '  --json             Emit validated ReleaseArtifactV1 for publish/cut',
       '  --help, -h          Show this help',
       '',
     ].join('\n'),
@@ -206,7 +212,8 @@ export function run(
         force: parsed.force,
         allowEmpty: parsed.allowEmpty,
       });
-      stdout.write(`Published ${path.relative(rootDir, result.releasePath)} from ${result.fragmentCount} fragment(s).\n`);
+      if (parsed.json) stdout.write(`${JSON.stringify(createReleaseArtifactV1(config, result, parsed.commit), null, 2)}\n`);
+      else stdout.write(`Published ${path.relative(rootDir, result.releasePath)} from ${result.fragmentCount} fragment(s).\n`);
       return 0;
     }
     case 'cut': {
@@ -217,8 +224,11 @@ export function run(
         force: parsed.force,
         allowEmpty: parsed.allowEmpty,
       });
-      stdout.write(`Cut ${result.previousVersion} -> ${result.version}\n`);
-      stdout.write(`Published ${path.relative(rootDir, result.releasePath)} from ${result.fragmentCount} fragment(s).\n`);
+      if (parsed.json) stdout.write(`${JSON.stringify(createReleaseArtifactV1(config, result, parsed.commit), null, 2)}\n`);
+      else {
+        stdout.write(`Cut ${result.previousVersion} -> ${result.version}\n`);
+        stdout.write(`Published ${path.relative(rootDir, result.releasePath)} from ${result.fragmentCount} fragment(s).\n`);
+      }
       return 0;
     }
     case 'check': {

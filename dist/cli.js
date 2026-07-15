@@ -42,6 +42,7 @@ function parseArgs(argv) {
         force: false,
         allowEmpty: false,
         help: false,
+        json: false,
     };
     for (let index = 0; index < argv.length; index += 1) {
         const arg = argv[index];
@@ -59,6 +60,9 @@ function parseArgs(argv) {
         }
         else if (arg === '--allow-empty') {
             parsed.allowEmpty = true;
+        }
+        else if (arg === '--json') {
+            parsed.json = true;
         }
         else if (!parsed.verb && !arg.startsWith('-')) {
             parsed.verb = arg;
@@ -105,6 +109,7 @@ function writeHelp(stream) {
         '  --base <ref>       Base ref to diff against (for `hygiene`)',
         '  --force            Overwrite an existing release file',
         '  --allow-empty      Allow publishing/cutting with no fragments',
+        '  --json             Emit validated ReleaseArtifactV1 for publish/cut',
         '  --help, -h          Show this help',
         '',
     ].join('\n'));
@@ -167,7 +172,10 @@ function run(argv = process.argv.slice(2), stdout = process.stdout, stderr = pro
                 force: parsed.force,
                 allowEmpty: parsed.allowEmpty,
             });
-            stdout.write(`Published ${node_path_1.default.relative(rootDir, result.releasePath)} from ${result.fragmentCount} fragment(s).\n`);
+            if (parsed.json)
+                stdout.write(`${JSON.stringify((0, publish_1.createReleaseArtifactV1)(config, result, parsed.commit), null, 2)}\n`);
+            else
+                stdout.write(`Published ${node_path_1.default.relative(rootDir, result.releasePath)} from ${result.fragmentCount} fragment(s).\n`);
             return 0;
         }
         case 'cut': {
@@ -178,8 +186,12 @@ function run(argv = process.argv.slice(2), stdout = process.stdout, stderr = pro
                 force: parsed.force,
                 allowEmpty: parsed.allowEmpty,
             });
-            stdout.write(`Cut ${result.previousVersion} -> ${result.version}\n`);
-            stdout.write(`Published ${node_path_1.default.relative(rootDir, result.releasePath)} from ${result.fragmentCount} fragment(s).\n`);
+            if (parsed.json)
+                stdout.write(`${JSON.stringify((0, publish_1.createReleaseArtifactV1)(config, result, parsed.commit), null, 2)}\n`);
+            else {
+                stdout.write(`Cut ${result.previousVersion} -> ${result.version}\n`);
+                stdout.write(`Published ${node_path_1.default.relative(rootDir, result.releasePath)} from ${result.fragmentCount} fragment(s).\n`);
+            }
             return 0;
         }
         case 'check': {

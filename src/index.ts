@@ -35,6 +35,7 @@ export {
   publishRelease,
   validateReleaseState,
   cutRelease,
+  createReleaseArtifactV1,
 } from './publish';
 export type {
   BumpVersionOptions,
@@ -44,6 +45,7 @@ export type {
   ValidateReleaseStateResult,
   CutReleaseOptions,
   CutReleaseResult,
+  ReleaseArtifactV1,
 } from './publish';
 
 export {

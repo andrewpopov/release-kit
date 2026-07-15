@@ -8,8 +8,8 @@ export { parseFrontMatter, slugify, todayIso, isFragmentFile, parseFragment, col
 export type { Fragment, ParsedFrontMatter, WriteNewFragmentOptions } from './fragments';
 export { renderReleaseNote, parseReleaseSummary, renderPatchNotesIndex } from './render';
 export type { ReleaseSummary, RenderReleaseNoteOptions } from './render';
-export { resolveVersion, nextVersion, getGitShortSha, bumpVersion, listReleaseSummaries, updatePatchNotesIndex, publishRelease, validateReleaseState, cutRelease, } from './publish';
-export type { BumpVersionOptions, BumpVersionResult, PublishReleaseOptions, PublishReleaseResult, ValidateReleaseStateResult, CutReleaseOptions, CutReleaseResult, } from './publish';
+export { resolveVersion, nextVersion, getGitShortSha, bumpVersion, listReleaseSummaries, updatePatchNotesIndex, publishRelease, validateReleaseState, cutRelease, createReleaseArtifactV1, } from './publish';
+export type { BumpVersionOptions, BumpVersionResult, PublishReleaseOptions, PublishReleaseResult, ValidateReleaseStateResult, CutReleaseOptions, CutReleaseResult, ReleaseArtifactV1, } from './publish';
 export { classifyReleaseHygiene, collectChangedFiles, checkReleaseHygiene, isPatchNoteArtifact, isReleaseRelevantFile, } from './hygiene';
 export type { HygieneResult, CheckReleaseHygieneOptions } from './hygiene';
 export { run as runCli, parseArgs as parseCliArgs } from './cli';
