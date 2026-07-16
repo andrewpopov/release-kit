@@ -8,7 +8,7 @@ release-relevant code changes ship with a patch-note artifact. The package
 owns the **mechanics**; each consuming project supplies its own **policy**
 (paths, valid kinds, wording, version strategy, version-manifest adapter)
 via a small `ReleaseKitConfig`. It has **zero runtime dependencies**:
-front-matter parsing and alpha-semver math are hand-rolled.
+front-matter parsing and semver math are hand-rolled.
 
 Extracted from the release tooling of
 [rouge](https://github.com/andrewpopov/rouge), a game project whose scripts
@@ -22,7 +22,7 @@ rationale.
 This package is distributed via GitHub tags (not npm):
 
 ```bash
-npm install github:andrewpopov/release-kit#v0.1.2
+npm install github:andrewpopov/release-kit#v0.1.3
 ```
 
 ## Quick start
@@ -32,11 +32,11 @@ then write a `release-kit.config.js` at your repo root:
 
 ```js
 // release-kit.config.js
-const { defineConfig, alphaSemver, npmPackage } = require('@andrewpopov/release-kit');
+const { defineConfig, stableSemver, npmPackage } = require('@andrewpopov/release-kit');
 
 module.exports = defineConfig({
   productName: 'My Product',
-  stage: 'alpha',
+  stage: 'stable',
   rootDir: __dirname,
   paths: {
     notesDir: 'docs/patch-notes',
@@ -48,7 +48,7 @@ module.exports = defineConfig({
     { id: 'fix', heading: 'Fixes' },
     { id: 'ops', heading: 'Operations' },
   ],
-  versionStrategy: alphaSemver({ versionLabel: 'Product version' }),
+  versionStrategy: stableSemver({ versionLabel: 'Product version' }),
   manifest: npmPackage(),
   hygiene: {
     baseRef: 'origin/main',
@@ -168,10 +168,10 @@ interface VersionStrategy {
 }
 ```
 
-`alphaSemver({ versionLabel? })` ships in v0.1.0 (`X.Y.Z-alpha.N`, bump only
-`N`). A `stableSemver` (real major/minor/patch) strategy is a natural
-addition for a non-alpha consumer, added when one exists — not built
-speculatively.
+`alphaSemver({ versionLabel? })` supports `X.Y.Z-alpha.N` and increments only
+`N`. `stableSemver({ versionLabel? })` supports `X.Y.Z`; automatic bumps
+increment the patch component, while `bump --version` and `cut --version`
+accept an explicit stable version for major or minor releases.
 
 ### `VersionManifestAdapter`
 
@@ -192,7 +192,7 @@ consumers aren't blocked).
 
 ```ts
 import {
-  defineConfig, alphaSemver, npmPackage,
+  defineConfig, alphaSemver, stableSemver, npmPackage,
   parseFragment, collectFragments, writeNewFragment,
   renderReleaseNote, renderPatchNotesIndex, parseReleaseSummary,
   resolveVersion, nextVersion, bumpVersion,

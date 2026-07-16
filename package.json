@@ -1,7 +1,7 @@
 {
   "name": "@andrewpopov/release-kit",
-  "version": "0.1.2",
-  "description": "Reusable release/patch-note toolkit: alpha-semver versioning, fragment-based patch notes, release cut/publish/validate, and release-hygiene enforcement. Consumers inject all policy (paths, kinds, wording) via a small config.",
+  "version": "0.1.3",
+  "description": "Reusable release/patch-note toolkit: alpha and stable semver strategies, fragment-based patch notes, release cut/publish/validate, and release-hygiene enforcement. Consumers inject all policy (paths, kinds, wording) via a small config.",
   "author": "Andrew Popov",
   "license": "MIT",
   "repository": { "type": "git", "url": "https://github.com/andrewpopov/release-kit.git" },

@@ -1,7 +1,7 @@
 export { defineConfig, resolvePaths, notesDirPosix, releaseLinkPath, renderTitle, titleRegExp, applyTemplate } from './config';
 export type { ReleaseKitConfig, ReleaseKitPaths, ReleaseKindDef, HygieneConfig, ResolvedPaths } from './config';
-export { alphaSemver, ALPHA_VERSION_RE } from './version';
-export type { VersionStrategy, AlphaSemverOptions } from './version';
+export { alphaSemver, stableSemver, ALPHA_VERSION_RE, STABLE_VERSION_RE } from './version';
+export type { VersionStrategy, AlphaSemverOptions, StableSemverOptions } from './version';
 export { npmPackage } from './manifest';
 export type { VersionManifestAdapter, NpmPackageOptions } from './manifest';
 export { parseFrontMatter, slugify, todayIso, isFragmentFile, parseFragment, collectFragments, normalizeFragmentBody, writeNewFragment, } from './fragments';
