@@ -2,7 +2,8 @@
  * Version-strategy seam. `VersionStrategy` is the pluggable policy for how a
  * product's version string is shaped, validated, ordered, and mapped to a
  * release-file name. `alphaSemver` reproduces rouge's exact current behavior
- * (`X.Y.Z-alpha.N`, bump only `N`).
+ * (`X.Y.Z-alpha.N`, bump only `N`); `stableSemver` provides conventional
+ * stable releases (`X.Y.Z`, defaulting to a patch bump).
  */
 
 import type { ReleaseSummary } from './render';
@@ -29,8 +30,19 @@ export interface AlphaSemverOptions {
   versionLabel?: string;
 }
 
+export interface StableSemverOptions {
+  /**
+   * Human-readable label used in error messages, e.g. `Service version
+   * "1.0" must use stable semver...`. Defaults to `"Version"`.
+   */
+  versionLabel?: string;
+}
+
 /** `X.Y.Z-alpha.N` — matches rouge's `ALPHA_VERSION_RE` exactly. */
 export const ALPHA_VERSION_RE = /^(\d+)\.(\d+)\.(\d+)-alpha\.(\d+)$/;
+
+/** `X.Y.Z` with numeric major, minor, and patch components. */
+export const STABLE_VERSION_RE = /^(\d+)\.(\d+)\.(\d+)$/;
 
 /**
  * Alpha-semver version strategy: `0.1.0-alpha.0`, `0.1.0-alpha.1`, ...
@@ -64,6 +76,55 @@ export function alphaSemver(options: AlphaSemverOptions = {}): VersionStrategy {
     const rightMatch = String(b.version || '').match(ALPHA_VERSION_RE);
     if (leftMatch && rightMatch) {
       for (let index = 1; index <= 4; index += 1) {
+        const delta = Number(rightMatch[index]) - Number(leftMatch[index]);
+        if (delta !== 0) {
+          return delta;
+        }
+      }
+    }
+    return a.date !== b.date
+      ? String(b.date || '').localeCompare(String(a.date || ''))
+      : String(b.version || '').localeCompare(String(a.version || ''));
+  }
+
+  return { assert, next, compareDesc, releaseFileName };
+}
+
+/**
+ * Stable-semver version strategy: `1.0.0`, `1.0.1`, ...
+ * `next()` increments the patch component. Callers can still supply an
+ * explicit version to the release-kit bump/cut APIs for major or minor cuts.
+ */
+export function stableSemver(options: StableSemverOptions = {}): VersionStrategy {
+  const versionLabel = options.versionLabel ?? 'Version';
+
+  function parse(version: string): RegExpMatchArray {
+    const match = String(version || '').match(STABLE_VERSION_RE);
+    if (!match) {
+      throw new Error(`${versionLabel} "${version}" must use stable semver, for example 1.0.0.`);
+    }
+    return match;
+  }
+
+  function assert(version: string): void {
+    parse(version);
+  }
+
+  function next(version: string): string {
+    const match = parse(version);
+    return `${match[1]}.${match[2]}.${Number(match[3]) + 1}`;
+  }
+
+  function releaseFileName(version: string): string {
+    assert(version);
+    return `${version}.md`;
+  }
+
+  function compareDesc(a: ReleaseSummary, b: ReleaseSummary): number {
+    const leftMatch = String(a.version || '').match(STABLE_VERSION_RE);
+    const rightMatch = String(b.version || '').match(STABLE_VERSION_RE);
+    if (leftMatch && rightMatch) {
+      for (let index = 1; index <= 3; index += 1) {
         const delta = Number(rightMatch[index]) - Number(leftMatch[index]);
         if (delta !== 0) {
           return delta;

@@ -17,6 +17,12 @@ CHANGELOG entry.
 
 ---
 
+## 0.1.3
+
+- Add `stableSemver`, a stable `X.Y.Z` version strategy extracted from the
+  Smart Home service. Automatic cuts increment patch versions; explicit
+  versions continue to support deliberate major and minor releases.
+
 ## 0.1.2
 
 - Publish `ReleaseArtifactV1` and the validation-gated JSON output introduced

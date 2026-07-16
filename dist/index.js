@@ -2,7 +2,7 @@
 // Shorthand re-exports (no renaming) so cjs-module-lexer statically detects
 // the named exports for ESM consumers of the CommonJS build.
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.parseCliArgs = exports.runCli = exports.isReleaseRelevantFile = exports.isPatchNoteArtifact = exports.checkReleaseHygiene = exports.collectChangedFiles = exports.classifyReleaseHygiene = exports.createReleaseArtifactV1 = exports.cutRelease = exports.validateReleaseState = exports.publishRelease = exports.updatePatchNotesIndex = exports.listReleaseSummaries = exports.bumpVersion = exports.getGitShortSha = exports.nextVersion = exports.resolveVersion = exports.renderPatchNotesIndex = exports.parseReleaseSummary = exports.renderReleaseNote = exports.writeNewFragment = exports.normalizeFragmentBody = exports.collectFragments = exports.parseFragment = exports.isFragmentFile = exports.todayIso = exports.slugify = exports.parseFrontMatter = exports.npmPackage = exports.ALPHA_VERSION_RE = exports.alphaSemver = exports.applyTemplate = exports.titleRegExp = exports.renderTitle = exports.releaseLinkPath = exports.notesDirPosix = exports.resolvePaths = exports.defineConfig = void 0;
+exports.parseCliArgs = exports.runCli = exports.isReleaseRelevantFile = exports.isPatchNoteArtifact = exports.checkReleaseHygiene = exports.collectChangedFiles = exports.classifyReleaseHygiene = exports.createReleaseArtifactV1 = exports.cutRelease = exports.validateReleaseState = exports.publishRelease = exports.updatePatchNotesIndex = exports.listReleaseSummaries = exports.bumpVersion = exports.getGitShortSha = exports.nextVersion = exports.resolveVersion = exports.renderPatchNotesIndex = exports.parseReleaseSummary = exports.renderReleaseNote = exports.writeNewFragment = exports.normalizeFragmentBody = exports.collectFragments = exports.parseFragment = exports.isFragmentFile = exports.todayIso = exports.slugify = exports.parseFrontMatter = exports.npmPackage = exports.STABLE_VERSION_RE = exports.ALPHA_VERSION_RE = exports.stableSemver = exports.alphaSemver = exports.applyTemplate = exports.titleRegExp = exports.renderTitle = exports.releaseLinkPath = exports.notesDirPosix = exports.resolvePaths = exports.defineConfig = void 0;
 var config_1 = require("./config");
 Object.defineProperty(exports, "defineConfig", { enumerable: true, get: function () { return config_1.defineConfig; } });
 Object.defineProperty(exports, "resolvePaths", { enumerable: true, get: function () { return config_1.resolvePaths; } });
@@ -13,7 +13,9 @@ Object.defineProperty(exports, "titleRegExp", { enumerable: true, get: function 
 Object.defineProperty(exports, "applyTemplate", { enumerable: true, get: function () { return config_1.applyTemplate; } });
 var version_1 = require("./version");
 Object.defineProperty(exports, "alphaSemver", { enumerable: true, get: function () { return version_1.alphaSemver; } });
+Object.defineProperty(exports, "stableSemver", { enumerable: true, get: function () { return version_1.stableSemver; } });
 Object.defineProperty(exports, "ALPHA_VERSION_RE", { enumerable: true, get: function () { return version_1.ALPHA_VERSION_RE; } });
+Object.defineProperty(exports, "STABLE_VERSION_RE", { enumerable: true, get: function () { return version_1.STABLE_VERSION_RE; } });
 var manifest_1 = require("./manifest");
 Object.defineProperty(exports, "npmPackage", { enumerable: true, get: function () { return manifest_1.npmPackage; } });
 var fragments_1 = require("./fragments");
