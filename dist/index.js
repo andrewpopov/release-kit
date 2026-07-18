@@ -2,7 +2,7 @@
 // Shorthand re-exports (no renaming) so cjs-module-lexer statically detects
 // the named exports for ESM consumers of the CommonJS build.
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.parseCliArgs = exports.runCli = exports.isReleaseRelevantFile = exports.isPatchNoteArtifact = exports.checkReleaseHygiene = exports.collectChangedFiles = exports.classifyReleaseHygiene = exports.createReleaseArtifactV1 = exports.cutRelease = exports.validateReleaseState = exports.publishRelease = exports.updatePatchNotesIndex = exports.listReleaseSummaries = exports.bumpVersion = exports.getGitShortSha = exports.nextVersion = exports.resolveVersion = exports.renderPatchNotesIndex = exports.parseReleaseSummary = exports.renderReleaseNote = exports.writeNewFragment = exports.normalizeFragmentBody = exports.collectFragments = exports.parseFragment = exports.isFragmentFile = exports.todayIso = exports.slugify = exports.parseFrontMatter = exports.npmPackage = exports.STABLE_VERSION_RE = exports.ALPHA_VERSION_RE = exports.stableSemver = exports.alphaSemver = exports.applyTemplate = exports.titleRegExp = exports.renderTitle = exports.releaseLinkPath = exports.notesDirPosix = exports.resolvePaths = exports.defineConfig = void 0;
+exports.parseCliArgs = exports.runCli = exports.isReleaseRelevantFile = exports.isPatchNoteArtifact = exports.checkReleaseHygiene = exports.collectChangedFiles = exports.classifyReleaseHygiene = exports.createReleaseArtifactV1 = exports.cutRelease = exports.validateReleaseState = exports.publishRelease = exports.updatePatchNotesIndex = exports.listReleaseSummaries = exports.bumpVersion = exports.getGitShortSha = exports.nextVersion = exports.resolveVersion = exports.createAnthropicReleaseSummaryGenerator = exports.announceReleaseToDiscord = exports.postReleaseToDiscord = exports.buildDiscordReleasePayload = exports.generateAiReleaseSummary = exports.buildAiReleaseSummaryPrompt = exports.summarizeReleaseWork = exports.renderPatchNotesIndex = exports.parseReleaseSummary = exports.renderReleaseNote = exports.writeNewFragment = exports.normalizeFragmentBody = exports.collectFragments = exports.parseFragment = exports.isFragmentFile = exports.todayIso = exports.slugify = exports.parseFrontMatter = exports.npmPackage = exports.STABLE_VERSION_RE = exports.ALPHA_VERSION_RE = exports.stableSemver = exports.alphaSemver = exports.applyTemplate = exports.titleRegExp = exports.renderTitle = exports.releaseLinkPath = exports.notesDirPosix = exports.resolvePaths = exports.defineConfig = void 0;
 var config_1 = require("./config");
 Object.defineProperty(exports, "defineConfig", { enumerable: true, get: function () { return config_1.defineConfig; } });
 Object.defineProperty(exports, "resolvePaths", { enumerable: true, get: function () { return config_1.resolvePaths; } });
@@ -31,6 +31,16 @@ var render_1 = require("./render");
 Object.defineProperty(exports, "renderReleaseNote", { enumerable: true, get: function () { return render_1.renderReleaseNote; } });
 Object.defineProperty(exports, "parseReleaseSummary", { enumerable: true, get: function () { return render_1.parseReleaseSummary; } });
 Object.defineProperty(exports, "renderPatchNotesIndex", { enumerable: true, get: function () { return render_1.renderPatchNotesIndex; } });
+var work_summary_1 = require("./work-summary");
+Object.defineProperty(exports, "summarizeReleaseWork", { enumerable: true, get: function () { return work_summary_1.summarizeReleaseWork; } });
+var announcement_1 = require("./announcement");
+Object.defineProperty(exports, "buildAiReleaseSummaryPrompt", { enumerable: true, get: function () { return announcement_1.buildAiReleaseSummaryPrompt; } });
+Object.defineProperty(exports, "generateAiReleaseSummary", { enumerable: true, get: function () { return announcement_1.generateAiReleaseSummary; } });
+Object.defineProperty(exports, "buildDiscordReleasePayload", { enumerable: true, get: function () { return announcement_1.buildDiscordReleasePayload; } });
+Object.defineProperty(exports, "postReleaseToDiscord", { enumerable: true, get: function () { return announcement_1.postReleaseToDiscord; } });
+Object.defineProperty(exports, "announceReleaseToDiscord", { enumerable: true, get: function () { return announcement_1.announceReleaseToDiscord; } });
+var anthropic_1 = require("./anthropic");
+Object.defineProperty(exports, "createAnthropicReleaseSummaryGenerator", { enumerable: true, get: function () { return anthropic_1.createAnthropicReleaseSummaryGenerator; } });
 var publish_1 = require("./publish");
 Object.defineProperty(exports, "resolveVersion", { enumerable: true, get: function () { return publish_1.resolveVersion; } });
 Object.defineProperty(exports, "nextVersion", { enumerable: true, get: function () { return publish_1.nextVersion; } });

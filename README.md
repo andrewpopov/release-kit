@@ -22,7 +22,7 @@ rationale.
 This package is distributed via GitHub tags (not npm):
 
 ```bash
-npm install github:andrewpopov/release-kit#v0.1.3
+npm install github:andrewpopov/release-kit#v0.1.4
 ```
 
 ## Quick start
@@ -195,6 +195,9 @@ import {
   defineConfig, alphaSemver, stableSemver, npmPackage,
   parseFragment, collectFragments, writeNewFragment,
   renderReleaseNote, renderPatchNotesIndex, parseReleaseSummary,
+  summarizeReleaseWork,
+  generateAiReleaseSummary, announceReleaseToDiscord,
+  createAnthropicReleaseSummaryGenerator,
   resolveVersion, nextVersion, bumpVersion,
   publishRelease, validateReleaseState, cutRelease, listReleaseSummaries,
   classifyReleaseHygiene, checkReleaseHygiene, collectChangedFiles,
@@ -202,19 +205,66 @@ import {
 } from '@andrewpopov/release-kit';
 ```
 
+### Structured release-work summary
+
+`summarizeReleaseWork(config, fragments)` turns the same validated fragments
+used to render a release note into transport-neutral data. It preserves the
+configured release-kind order, omits empty kinds, and normalizes each
+fragment body exactly as the markdown renderer does. This lets a dashboard,
+notification, or API describe the work in a release without parsing markdown.
+
+```ts
+const fragments = collectFragments(config);
+const work = summarizeReleaseWork(config, fragments);
+// { itemCount, groups: [{ kind, heading, items: [{ summary, description, fileName }] }] }
+```
+
+### AI summary and Discord announcement
+
+Release-kit includes a zero-dependency Anthropic Messages API adapter and also
+accepts any compatible injected AI generator. Capture fragments before
+`cutRelease` consumes them, cut and validate the release, then announce it.
+The webhook is called only after the explicit release step succeeds.
+
+```ts
+const fragments = collectFragments(config);
+const result = cutRelease(config);
+const generate = createAnthropicReleaseSummaryGenerator();
+
+await announceReleaseToDiscord({
+  config,
+  version: result.version,
+  fragments,
+  webhookUrl: process.env.DISCORD_RELEASE_WEBHOOK,
+  releaseUrl: `https://example.com/releases/${result.version}`,
+  generate,
+});
+```
+
+Set `ANTHROPIC_API_KEY` in the release process's secret environment. The
+Anthropic adapter defaults to `claude-haiku-4-5`; pass `{ model }` or
+`{ maxTokens }` when creating it to override those defaults. It calls the
+Messages API directly with no runtime SDK dependency.
+
+The announcement contains the AI-written overview plus release items grouped
+under the configured headings. Discord limits are enforced, release-item text
+is marked as untrusted in the model prompt, and webhook URLs must be HTTPS
+Discord webhook endpoints. Keep the webhook and model credential in the
+consumer's secret store; they do not belong in `ReleaseKitConfig`.
+
 Most functions are deterministic and filesystem-light (given fragments +
 an injected date/commit), which makes them easy to test in temporary
 directories — see `src/__tests__/` in this repo for examples, including a
 golden-parity test that diffs this package's output against rouge's real,
 unmodified scripts.
 
-## Scope (v0.1.0)
+## Scope
 
-Everything the three original release scripts do EXCEPT a Discord notifier
-(`release-kit announce discord ...`), which is planned for v0.2.0 after cut
-behavior is stable elsewhere. The source project's Discord bot, public
-patch-notes site generator, and deploy-counter scripts are product-specific
-and were deliberately not extracted.
+The source project's Discord bot, public patch-notes site generator, and
+deploy-counter scripts remain product-specific. Release-kit owns only the
+transport-neutral AI request, an optional Anthropic transport, Discord webhook
+payload, and posting mechanics; consumers keep credentials, release URLs, and
+orchestration.
 
 ## Known limitations & planned hardening (v0.1.x)
 

@@ -17,6 +17,16 @@ CHANGELOG entry.
 
 ---
 
+## 0.1.4
+
+- Add `summarizeReleaseWork`, a structured, transport-neutral view of the
+  fragments included in a release for dashboards, APIs, and notifications.
+- Add provider-neutral AI release summaries and validated Discord webhook
+  announcements containing both the generated overview and grouped release
+  work.
+- Add a zero-dependency Anthropic Messages API generator that reads
+  `ANTHROPIC_API_KEY` at request time and defaults to Claude Haiku 4.5.
+
 ## 0.1.3
 
 - Add `stableSemver`, a stable `X.Y.Z` version strategy extracted from the
