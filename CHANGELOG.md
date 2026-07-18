@@ -24,6 +24,8 @@ CHANGELOG entry.
 - Add provider-neutral AI release summaries and validated Discord webhook
   announcements containing both the generated overview and grouped release
   work.
+- Add a zero-dependency Anthropic Messages API generator that reads
+  `ANTHROPIC_API_KEY` at request time and defaults to Claude Haiku 4.5.
 
 ## 0.1.3
 

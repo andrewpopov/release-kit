@@ -39,6 +39,7 @@ const EXPECTED_EXPORTS = [
   'buildDiscordReleasePayload',
   'postReleaseToDiscord',
   'announceReleaseToDiscord',
+  'createAnthropicReleaseSummaryGenerator',
   'resolveVersion',
   'nextVersion',
   'bumpVersion',

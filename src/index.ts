@@ -49,6 +49,13 @@ export type {
   ReleaseAnnouncementResult,
 } from './announcement';
 
+export { createAnthropicReleaseSummaryGenerator } from './anthropic';
+export type {
+  AnthropicFetchResponse,
+  AnthropicFetch,
+  AnthropicReleaseSummaryOptions,
+} from './anthropic';
+
 export {
   resolveVersion,
   nextVersion,

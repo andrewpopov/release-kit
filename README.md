@@ -197,6 +197,7 @@ import {
   renderReleaseNote, renderPatchNotesIndex, parseReleaseSummary,
   summarizeReleaseWork,
   generateAiReleaseSummary, announceReleaseToDiscord,
+  createAnthropicReleaseSummaryGenerator,
   resolveVersion, nextVersion, bumpVersion,
   publishRelease, validateReleaseState, cutRelease, listReleaseSummaries,
   classifyReleaseHygiene, checkReleaseHygiene, collectChangedFiles,
@@ -220,14 +221,15 @@ const work = summarizeReleaseWork(config, fragments);
 
 ### AI summary and Discord announcement
 
-Release-kit accepts an injected AI generator instead of owning a model SDK or
-API key. Capture fragments before `cutRelease` consumes them, cut and validate
-the release, then announce it. The webhook is called only after the explicit
-release step succeeds.
+Release-kit includes a zero-dependency Anthropic Messages API adapter and also
+accepts any compatible injected AI generator. Capture fragments before
+`cutRelease` consumes them, cut and validate the release, then announce it.
+The webhook is called only after the explicit release step succeeds.
 
 ```ts
 const fragments = collectFragments(config);
 const result = cutRelease(config);
+const generate = createAnthropicReleaseSummaryGenerator();
 
 await announceReleaseToDiscord({
   config,
@@ -235,16 +237,14 @@ await announceReleaseToDiscord({
   fragments,
   webhookUrl: process.env.DISCORD_RELEASE_WEBHOOK,
   releaseUrl: `https://example.com/releases/${result.version}`,
-  generate: async ({ systemPrompt, input, maxCharacters }) => {
-    const response = await yourAiClient.generate({
-      systemPrompt,
-      input,
-      maxCharacters,
-    });
-    return response.text;
-  },
+  generate,
 });
 ```
+
+Set `ANTHROPIC_API_KEY` in the release process's secret environment. The
+Anthropic adapter defaults to `claude-haiku-4-5`; pass `{ model }` or
+`{ maxTokens }` when creating it to override those defaults. It calls the
+Messages API directly with no runtime SDK dependency.
 
 The announcement contains the AI-written overview plus release items grouped
 under the configured headings. Discord limits are enforced, release-item text
@@ -262,8 +262,9 @@ unmodified scripts.
 
 The source project's Discord bot, public patch-notes site generator, and
 deploy-counter scripts remain product-specific. Release-kit owns only the
-transport-neutral AI request, Discord webhook payload, and posting mechanics;
-consumers keep model selection, credentials, release URLs, and orchestration.
+transport-neutral AI request, an optional Anthropic transport, Discord webhook
+payload, and posting mechanics; consumers keep credentials, release URLs, and
+orchestration.
 
 ## Known limitations & planned hardening (v0.1.x)
 
