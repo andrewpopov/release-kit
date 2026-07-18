@@ -8,6 +8,8 @@ export { parseFrontMatter, slugify, todayIso, isFragmentFile, parseFragment, col
 export type { Fragment, ParsedFrontMatter, WriteNewFragmentOptions } from './fragments';
 export { renderReleaseNote, parseReleaseSummary, renderPatchNotesIndex } from './render';
 export type { ReleaseSummary, RenderReleaseNoteOptions } from './render';
+export { summarizeReleaseWork } from './work-summary';
+export type { ReleaseWorkItem, ReleaseWorkGroup, ReleaseWorkSummary } from './work-summary';
 export { resolveVersion, nextVersion, getGitShortSha, bumpVersion, listReleaseSummaries, updatePatchNotesIndex, publishRelease, validateReleaseState, cutRelease, createReleaseArtifactV1, } from './publish';
 export type { BumpVersionOptions, BumpVersionResult, PublishReleaseOptions, PublishReleaseResult, ValidateReleaseStateResult, CutReleaseOptions, CutReleaseResult, ReleaseArtifactV1, } from './publish';
 export { classifyReleaseHygiene, collectChangedFiles, checkReleaseHygiene, isPatchNoteArtifact, isReleaseRelevantFile, } from './hygiene';

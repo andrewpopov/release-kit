@@ -195,11 +195,26 @@ import {
   defineConfig, alphaSemver, stableSemver, npmPackage,
   parseFragment, collectFragments, writeNewFragment,
   renderReleaseNote, renderPatchNotesIndex, parseReleaseSummary,
+  summarizeReleaseWork,
   resolveVersion, nextVersion, bumpVersion,
   publishRelease, validateReleaseState, cutRelease, listReleaseSummaries,
   classifyReleaseHygiene, checkReleaseHygiene, collectChangedFiles,
   runCli,
 } from '@andrewpopov/release-kit';
+```
+
+### Structured release-work summary
+
+`summarizeReleaseWork(config, fragments)` turns the same validated fragments
+used to render a release note into transport-neutral data. It preserves the
+configured release-kind order, omits empty kinds, and normalizes each
+fragment body exactly as the markdown renderer does. This lets a dashboard,
+notification, or API describe the work in a release without parsing markdown.
+
+```ts
+const fragments = collectFragments(config);
+const work = summarizeReleaseWork(config, fragments);
+// { itemCount, groups: [{ kind, heading, items: [{ summary, description, fileName }] }] }
 ```
 
 Most functions are deterministic and filesystem-light (given fragments +

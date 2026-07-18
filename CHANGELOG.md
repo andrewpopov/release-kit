@@ -17,6 +17,11 @@ CHANGELOG entry.
 
 ---
 
+## Unreleased
+
+- Add `summarizeReleaseWork`, a structured, transport-neutral view of the
+  fragments included in a release for dashboards, APIs, and notifications.
+
 ## 0.1.3
 
 - Add `stableSemver`, a stable `X.Y.Z` version strategy extracted from the

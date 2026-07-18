@@ -25,6 +25,9 @@ export type { Fragment, ParsedFrontMatter, WriteNewFragmentOptions } from './fra
 export { renderReleaseNote, parseReleaseSummary, renderPatchNotesIndex } from './render';
 export type { ReleaseSummary, RenderReleaseNoteOptions } from './render';
 
+export { summarizeReleaseWork } from './work-summary';
+export type { ReleaseWorkItem, ReleaseWorkGroup, ReleaseWorkSummary } from './work-summary';
+
 export {
   resolveVersion,
   nextVersion,
