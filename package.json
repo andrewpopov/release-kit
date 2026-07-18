@@ -33,6 +33,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "verify:pack": "node scripts/verify-pack.mjs",
+    "verify:dist-fresh": "node scripts/verify-dist-fresh.mjs",
     "verify:tag": "node scripts/verify-release-tag.mjs",
     "verify": "npm run typecheck && npm test && npm run build && npm run verify:pack && npm audit --omit=dev --audit-level=high"
   },
