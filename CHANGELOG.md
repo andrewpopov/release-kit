@@ -17,7 +17,7 @@ CHANGELOG entry.
 
 ---
 
-## Unreleased
+## 0.1.4
 
 - Add `summarizeReleaseWork`, a structured, transport-neutral view of the
   fragments included in a release for dashboards, APIs, and notifications.
