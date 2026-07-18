@@ -21,6 +21,9 @@ CHANGELOG entry.
 
 - Add `summarizeReleaseWork`, a structured, transport-neutral view of the
   fragments included in a release for dashboards, APIs, and notifications.
+- Add provider-neutral AI release summaries and validated Discord webhook
+  announcements containing both the generated overview and grouped release
+  work.
 
 ## 0.1.3
 

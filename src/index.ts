@@ -29,6 +29,27 @@ export { summarizeReleaseWork } from './work-summary';
 export type { ReleaseWorkItem, ReleaseWorkGroup, ReleaseWorkSummary } from './work-summary';
 
 export {
+  buildAiReleaseSummaryPrompt,
+  generateAiReleaseSummary,
+  buildDiscordReleasePayload,
+  postReleaseToDiscord,
+  announceReleaseToDiscord,
+} from './announcement';
+export type {
+  AiReleaseSummaryRequest,
+  AiReleaseSummaryGenerator,
+  GenerateAiReleaseSummaryOptions,
+  DiscordEmbedField,
+  DiscordReleasePayload,
+  BuildDiscordReleasePayloadOptions,
+  DiscordFetchResponse,
+  DiscordFetch,
+  PostReleaseToDiscordOptions,
+  AnnounceReleaseToDiscordOptions,
+  ReleaseAnnouncementResult,
+} from './announcement';
+
+export {
   resolveVersion,
   nextVersion,
   getGitShortSha,

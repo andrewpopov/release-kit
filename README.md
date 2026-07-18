@@ -196,6 +196,7 @@ import {
   parseFragment, collectFragments, writeNewFragment,
   renderReleaseNote, renderPatchNotesIndex, parseReleaseSummary,
   summarizeReleaseWork,
+  generateAiReleaseSummary, announceReleaseToDiscord,
   resolveVersion, nextVersion, bumpVersion,
   publishRelease, validateReleaseState, cutRelease, listReleaseSummaries,
   classifyReleaseHygiene, checkReleaseHygiene, collectChangedFiles,
@@ -217,19 +218,52 @@ const work = summarizeReleaseWork(config, fragments);
 // { itemCount, groups: [{ kind, heading, items: [{ summary, description, fileName }] }] }
 ```
 
+### AI summary and Discord announcement
+
+Release-kit accepts an injected AI generator instead of owning a model SDK or
+API key. Capture fragments before `cutRelease` consumes them, cut and validate
+the release, then announce it. The webhook is called only after the explicit
+release step succeeds.
+
+```ts
+const fragments = collectFragments(config);
+const result = cutRelease(config);
+
+await announceReleaseToDiscord({
+  config,
+  version: result.version,
+  fragments,
+  webhookUrl: process.env.DISCORD_RELEASE_WEBHOOK,
+  releaseUrl: `https://example.com/releases/${result.version}`,
+  generate: async ({ systemPrompt, input, maxCharacters }) => {
+    const response = await yourAiClient.generate({
+      systemPrompt,
+      input,
+      maxCharacters,
+    });
+    return response.text;
+  },
+});
+```
+
+The announcement contains the AI-written overview plus release items grouped
+under the configured headings. Discord limits are enforced, release-item text
+is marked as untrusted in the model prompt, and webhook URLs must be HTTPS
+Discord webhook endpoints. Keep the webhook and model credential in the
+consumer's secret store; they do not belong in `ReleaseKitConfig`.
+
 Most functions are deterministic and filesystem-light (given fragments +
 an injected date/commit), which makes them easy to test in temporary
 directories — see `src/__tests__/` in this repo for examples, including a
 golden-parity test that diffs this package's output against rouge's real,
 unmodified scripts.
 
-## Scope (v0.1.0)
+## Scope
 
-Everything the three original release scripts do EXCEPT a Discord notifier
-(`release-kit announce discord ...`), which is planned for v0.2.0 after cut
-behavior is stable elsewhere. The source project's Discord bot, public
-patch-notes site generator, and deploy-counter scripts are product-specific
-and were deliberately not extracted.
+The source project's Discord bot, public patch-notes site generator, and
+deploy-counter scripts remain product-specific. Release-kit owns only the
+transport-neutral AI request, Discord webhook payload, and posting mechanics;
+consumers keep model selection, credentials, release URLs, and orchestration.
 
 ## Known limitations & planned hardening (v0.1.x)
 
