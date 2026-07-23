@@ -40,7 +40,13 @@
     "verify:pack": "node scripts/verify-pack.mjs",
     "verify:dist-fresh": "node scripts/verify-dist-fresh.mjs",
     "verify:tag": "node scripts/verify-release-tag.mjs",
-    "verify": "npm run typecheck && npm test && npm run build && npm run verify:pack && npm audit --omit=dev --audit-level=high"
+    "verify": "npm run typecheck && npm test && npm run build && npm run verify:pack && npm audit --omit=dev --audit-level=high",
+    "release:note": "node dist/cli.js note",
+    "release:notes": "node dist/cli.js notes",
+    "release:bump": "node dist/cli.js bump",
+    "release:cut": "node dist/cli.js cut",
+    "release:check": "node dist/cli.js check",
+    "release:hygiene": "node dist/cli.js hygiene"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
