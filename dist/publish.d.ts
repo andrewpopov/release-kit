@@ -7,7 +7,11 @@
  */
 import type { ReleaseKitConfig } from './config';
 import type { ReleaseSummary } from './render';
+import type { ReleaseNotesTarget } from './notes-target';
 export { collectFragments } from './fragments';
+export declare function tryStep<T>(errors: string[], fn: () => T, fallback: T, prefix?: string): T;
+/** Resolves the config's notes target, defaulting to `patchNotesDirTarget()` (rouge's current behavior). */
+export declare function resolveNotesTarget(config: ReleaseKitConfig): ReleaseNotesTarget;
 /** Returns `explicitVersion` trimmed, or the manifest's current version. */
 export declare function resolveVersion(config: ReleaseKitConfig, explicitVersion?: string): string;
 /** Returns `explicitVersion` trimmed, or the strategy's next version after the manifest's current version. */

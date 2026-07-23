@@ -8,6 +8,7 @@
 import path from 'node:path';
 import type { VersionStrategy } from './version';
 import type { VersionManifestAdapter } from './manifest';
+import type { ReleaseNotesTarget } from './notes-target';
 
 export interface ReleaseKindDef {
   id: string;
@@ -73,6 +74,12 @@ export interface ReleaseKitConfig {
    * and `{publishCommand}`.
    */
   indexIntroTemplate: string;
+  /**
+   * Where publish/validate write and check release notes. Defaults to
+   * `patchNotesDirTarget()` (rouge's per-version `releases/<version>.md` +
+   * `PATCH_NOTES.md` index) when omitted — existing configs are unaffected.
+   */
+  notesTarget?: ReleaseNotesTarget;
 }
 
 /** Identity helper for type inference/IDE support when authoring a config file. */

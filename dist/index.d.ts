@@ -8,6 +8,8 @@ export { parseFrontMatter, slugify, todayIso, isFragmentFile, parseFragment, col
 export type { Fragment, ParsedFrontMatter, WriteNewFragmentOptions } from './fragments';
 export { renderReleaseNote, parseReleaseSummary, renderPatchNotesIndex } from './render';
 export type { ReleaseSummary, RenderReleaseNoteOptions } from './render';
+export { patchNotesDirTarget, changelogTarget } from './notes-target';
+export type { ReleaseNotesTarget, ReleaseNotesPublishContext, ChangelogTargetOptions } from './notes-target';
 export { summarizeReleaseWork } from './work-summary';
 export type { ReleaseWorkItem, ReleaseWorkGroup, ReleaseWorkSummary } from './work-summary';
 export { buildAiReleaseSummaryPrompt, generateAiReleaseSummary, buildDiscordReleasePayload, postReleaseToDiscord, announceReleaseToDiscord, } from './announcement';

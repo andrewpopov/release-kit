@@ -17,6 +17,26 @@ CHANGELOG entry.
 
 ---
 
+## 0.2.0
+
+- Add a pluggable release-notes **target** seam (`ReleaseNotesTarget`).
+  `publishRelease`, `validateReleaseState`, and `cutRelease` now route
+  target-specific writes and checks through `config.notesTarget`, defaulting to
+  `patchNotesDirTarget()` (the per-version `releases/<version>.md` + index
+  model). Existing consumers are unaffected — the default reproduces prior
+  behavior, proven by the unchanged golden/parity tests.
+- Add `changelogTarget()`, a flat `CHANGELOG.md` target: fragments compile into
+  a `## X.Y.Z` section prepended above existing version sections (and below any
+  non-version preamble), consuming fragments the same way. This is the format a
+  fleet `release-guard` greps with `^## <version>`. Options: `changelogPath`
+  (default `CHANGELOG.md`), `title` (default `Changelog`), `groupByKind`
+  (default `false`). Publishing splices in only the new section without
+  rewriting the rest of the file.
+- Add `hasVersion` to `ReleaseNotesTarget` so `cutRelease` rejects an
+  already-released version **before** bumping the manifest (no partial cut).
+- Export `patchNotesDirTarget`, `changelogTarget`, `ReleaseNotesTarget`,
+  `ReleaseNotesPublishContext`, and `ChangelogTargetOptions`.
+
 ## 0.1.4
 
 - Add `summarizeReleaseWork`, a structured, transport-neutral view of the
