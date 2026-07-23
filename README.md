@@ -143,6 +143,41 @@ mid-publish throw can leave the manifest bumped with fragments partially
 archived. Snapshot/rollback hardening is planned for a v0.1.1 release and
 will not change the happy-path output.
 
+## Notes targets
+
+Where a cut writes its notes is a pluggable seam. `config.notesTarget` selects
+one; it defaults to `patchNotesDirTarget()` — the per-version
+`releases/<version>.md` + `PATCH_NOTES.md` index model described above.
+
+For a project that keeps a single flat `CHANGELOG.md` (for example one gated by
+a CI `release-guard` that greps `^## <version>`), use `changelogTarget()`:
+
+```js
+const {
+  defineConfig, stableSemver, npmPackage, changelogTarget,
+} = require('@andrewpopov/release-kit');
+
+module.exports = defineConfig({
+  // ...productName, rootDir, kinds, hygiene, etc.
+  paths: { notesDir: '.changes', indexPath: '.changes/INDEX.md' },
+  versionStrategy: stableSemver(),
+  manifest: npmPackage(),
+  notesTarget: changelogTarget(),
+  // changelogTarget({ changelogPath?: 'CHANGELOG.md', title?: 'Changelog', groupByKind?: false })
+});
+```
+
+`cut` bumps the manifest, compiles `{notesDir}/unreleased/*.md` into a new
+`## <version>` section prepended above the existing version sections (and below
+any non-version preamble), archives the consumed fragments, and validates that
+the `## <version>` heading is present. The new section is spliced in without
+rewriting unrelated parts of the file; `indexPath` is unused by this target.
+
+Both targets satisfy the same `ReleaseNotesTarget` interface (`publish`,
+`validate`, `hasVersion`), so the `bump → publish → validate` cut flow is
+identical regardless of output format. Write your own target to render release
+notes anywhere else.
+
 ## The config seam (`ReleaseKitConfig`)
 
 Every product-specific detail (product name, paths, valid kinds, hygiene

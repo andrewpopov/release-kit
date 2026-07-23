@@ -11,6 +11,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.collectFragments = void 0;
+exports.tryStep = tryStep;
+exports.resolveNotesTarget = resolveNotesTarget;
 exports.resolveVersion = resolveVersion;
 exports.nextVersion = nextVersion;
 exports.getGitShortSha = getGitShortSha;
@@ -28,6 +30,7 @@ const node_crypto_1 = require("node:crypto");
 const config_1 = require("./config");
 const fragments_1 = require("./fragments");
 const render_1 = require("./render");
+const notes_target_1 = require("./notes-target");
 var fragments_2 = require("./fragments");
 Object.defineProperty(exports, "collectFragments", { enumerable: true, get: function () { return fragments_2.collectFragments; } });
 function tryStep(errors, fn, fallback, prefix = '') {
@@ -38,6 +41,10 @@ function tryStep(errors, fn, fallback, prefix = '') {
         errors.push(`${prefix}${error instanceof Error ? error.message : String(error)}`);
         return fallback;
     }
+}
+/** Resolves the config's notes target, defaulting to `patchNotesDirTarget()` (rouge's current behavior). */
+function resolveNotesTarget(config) {
+    return config.notesTarget ?? (0, notes_target_1.patchNotesDirTarget)();
 }
 /** Returns `explicitVersion` trimmed, or the manifest's current version. */
 function resolveVersion(config, explicitVersion) {
@@ -105,47 +112,14 @@ function publishRelease(config, options = {}) {
     const date = options.date || (0, fragments_1.todayIso)();
     config.versionStrategy.assert(version);
     const paths = (0, config_1.resolvePaths)(config);
-    node_fs_1.default.mkdirSync(paths.releasesDir, { recursive: true });
     node_fs_1.default.mkdirSync(paths.archiveDir, { recursive: true });
     node_fs_1.default.mkdirSync(paths.unreleasedDir, { recursive: true });
     const fragments = (0, fragments_1.collectFragments)(config);
     if (fragments.length === 0 && !options.allowEmpty) {
         throw new Error('No unreleased patch-note fragments found. Use --allow-empty to publish an empty note.');
     }
-    const releasePath = node_path_1.default.join(paths.releasesDir, config.versionStrategy.releaseFileName(version));
-    if (node_fs_1.default.existsSync(releasePath) && !options.force) {
-        throw new Error(`${node_path_1.default.relative(paths.rootDir, releasePath)} already exists. Re-run with --force to overwrite it.`);
-    }
-    node_fs_1.default.writeFileSync(releasePath, (0, render_1.renderReleaseNote)(config, { version, date, fragments, commit: String(options.commit || '') }), 'utf8');
-    if (fragments.length > 0) {
-        const archiveVersionDir = node_path_1.default.join(paths.archiveDir, version);
-        node_fs_1.default.mkdirSync(archiveVersionDir, { recursive: true });
-        for (const fragment of fragments) {
-            node_fs_1.default.copyFileSync(fragment.filePath, node_path_1.default.join(archiveVersionDir, fragment.fileName));
-            node_fs_1.default.rmSync(fragment.filePath);
-        }
-    }
-    updatePatchNotesIndex(config, version);
+    const { releasePath } = resolveNotesTarget(config).publish(config, { version, date, commit: String(options.commit || ''), fragments }, { force: options.force });
     return { version, releasePath, fragmentCount: fragments.length };
-}
-function validateReleaseFile(config, errors, rootDir, releasePath, expectedVersion) {
-    const release = tryStep(errors, () => (0, render_1.parseReleaseSummary)(config, releasePath), null);
-    if (!release) {
-        return;
-    }
-    const relativePath = node_path_1.default.relative(rootDir, releasePath);
-    if (release.titleVersion !== expectedVersion) {
-        errors.push(`${relativePath} title version ${release.titleVersion || '(missing)'} does not match ${expectedVersion}.`);
-    }
-    if (release.packageVersion !== expectedVersion) {
-        errors.push(`${relativePath} package version ${release.packageVersion || '(missing)'} does not match ${expectedVersion}.`);
-    }
-    if (release.stage.toLowerCase() !== config.stage.toLowerCase()) {
-        errors.push(`${relativePath} stage ${release.stage || '(missing)'} must be ${config.stage}.`);
-    }
-    if (!release.date) {
-        errors.push(`${relativePath} is missing a release date.`);
-    }
 }
 function validateReleaseState(config, explicitVersion = '') {
     const errors = [];
@@ -159,63 +133,28 @@ function validateReleaseState(config, explicitVersion = '') {
         }
     }
     tryStep(errors, () => (0, fragments_1.collectFragments)(config), []);
-    const { releasesDir, indexPath } = (0, config_1.resolvePaths)(config);
-    // Best-effort filename for path construction only; an invalid version was
-    // already reported by assert() above, so this never emits a second error.
-    let currentReleaseFileName = `${version}.md`;
-    try {
-        currentReleaseFileName = config.versionStrategy.releaseFileName(version);
-    }
-    catch {
-        // reported above
-    }
-    const currentReleasePath = node_path_1.default.join(releasesDir, currentReleaseFileName);
-    if (version && !node_fs_1.default.existsSync(currentReleasePath)) {
-        errors.push(`Current version ${version} has no published patch note at ${node_path_1.default.relative(rootDir, currentReleasePath)}.`);
-    }
-    else if (version) {
-        validateReleaseFile(config, errors, rootDir, currentReleasePath, version);
-    }
-    if (!node_fs_1.default.existsSync(indexPath)) {
-        errors.push(`Missing patch-note index: ${node_path_1.default.relative(rootDir, indexPath)}.`);
-    }
-    else {
-        const indexSource = node_fs_1.default.readFileSync(indexPath, 'utf8');
-        if (version && !indexSource.includes(`${config.currentVersionLabel}: \`${version}\``)) {
-            errors.push(`Patch-note index does not list ${config.currentVersionLabel.toLowerCase()} ${version}.`);
-        }
-        if (!indexSource.includes('<!-- patch-notes:start -->') || !indexSource.includes('<!-- patch-notes:end -->')) {
-            errors.push('Patch-note index is missing generated release markers.');
-        }
-        const expectedLink = `[${version}](${(0, config_1.releaseLinkPath)(config, currentReleaseFileName)})`;
-        if (version && !indexSource.includes(expectedLink)) {
-            errors.push(`Patch-note index does not link to ${config.paths.notesDir}/releases/${currentReleaseFileName}.`);
-        }
-    }
-    for (const release of listReleaseSummaries(config)) {
-        tryStep(errors, () => config.versionStrategy.assert(release.version), undefined, `${config.paths.notesDir}/releases/${release.fileName}: `);
-        if (!release.titleVersion) {
-            errors.push(`${config.paths.notesDir}/releases/${release.fileName} is missing the standard patch-note title.`);
-        }
-        if (release.packageVersion && release.packageVersion !== release.version) {
-            errors.push(`${config.paths.notesDir}/releases/${release.fileName} package version ${release.packageVersion} does not match title version ${release.version}.`);
-        }
-    }
+    errors.push(...resolveNotesTarget(config).validate(config, version));
     return { ok: errors.length === 0, errors, version };
 }
+/**
+ * Asserts the version shape, the empty-fragments guard, and the "notes
+ * already exist" guard BEFORE the manifest is bumped — so re-cutting an
+ * existing version without `--force` fails clean, leaving package.json
+ * untouched, instead of bumping first and only then throwing inside
+ * `publishRelease`/`ReleaseNotesTarget.publish`. That target-specific publish
+ * check is kept too (defense in depth against direct `publishRelease` calls
+ * that bypass `cutRelease`).
+ */
 function preflightCut(config, targetVersion, options) {
     config.versionStrategy.assert(targetVersion);
-    const rootDir = node_path_1.default.resolve(config.rootDir);
-    const { releasesDir } = (0, config_1.resolvePaths)(config);
+    if (resolveNotesTarget(config).hasVersion(config, targetVersion) && !options.force) {
+        throw new Error(`Release notes for ${targetVersion} already exist. Re-run with force to overwrite.`);
+    }
     const fragments = (0, fragments_1.collectFragments)(config);
     if (fragments.length === 0 && !options.allowEmpty) {
         throw new Error('No unreleased patch-note fragments found. Add fragments or pass --allow-empty.');
     }
-    const releasePath = node_path_1.default.join(releasesDir, config.versionStrategy.releaseFileName(targetVersion));
-    if (node_fs_1.default.existsSync(releasePath) && !options.force) {
-        throw new Error(`${node_path_1.default.relative(rootDir, releasePath)} already exists. Re-run with --force to overwrite it.`);
-    }
-    return { fragmentCount: fragments.length, releasePath };
+    return { fragmentCount: fragments.length };
 }
 /**
  * Bumps the manifest to the next (or explicit) version, publishes fragments
