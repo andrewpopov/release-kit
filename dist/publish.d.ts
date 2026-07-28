@@ -78,5 +78,7 @@ export interface CutReleaseResult {
  * Bumps the manifest to the next (or explicit) version, publishes fragments
  * into a versioned release file, and validates the result — rouge's exact
  * current order (bump -> publish -> validate), matching `cut-release.js`.
+ * Fragments are collected once here and threaded through preflight/publish,
+ * so the set that chose the version is provably the set that gets published.
  */
 export declare function cutRelease(config: ReleaseKitConfig, options?: CutReleaseOptions): CutReleaseResult;

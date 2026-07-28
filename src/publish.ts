@@ -18,6 +18,8 @@ import type { ReleaseSummary } from './render';
 import { parseReleaseSummary, renderPatchNotesIndex } from './render';
 import type { ReleaseNotesTarget } from './notes-target';
 import { patchNotesDirTarget } from './notes-target';
+import type { BumpLevel } from './version';
+import { resolveBumpLevel } from './version';
 
 export { collectFragments } from './fragments';
 
@@ -41,10 +43,45 @@ export function resolveVersion(config: ReleaseKitConfig, explicitVersion?: strin
   return String(explicitVersion || config.manifest.readVersion(rootDir)).trim();
 }
 
+/**
+ * Refuses an implicit (non-explicit-version) major/minor cut when the
+ * configured strategy hasn't declared whether it honours fragment kinds.
+ * Shared by `nextVersion`, `bumpVersion`, and `cutRelease` so the CLI `bump`
+ * command can't write a wrong manifest version that a later `publish`
+ * inherits.
+ */
+function assertBumpLevelSupported(config: ReleaseKitConfig, level: BumpLevel, fragments: Fragment[]): void {
+  if (level === 'patch' || config.versionStrategy.bumpLevelSupport !== undefined) {
+    return;
+  }
+  const offenders = fragments
+    .filter((fragment) => resolveBumpLevel([fragment.kind], config.kinds) === level)
+    .map((fragment) => `${fragment.kind}/${fragment.fileName}`)
+    .join(', ');
+  throw new Error(
+    `Refusing to auto-version a ${level} release: the configured version strategy does not ` +
+      `declare bumpLevelSupport, so release-kit cannot tell whether it honours fragment kinds. ` +
+      `Fragment(s) requiring a ${level} bump: ${offenders}. ` +
+      `Upgrade the strategy (add bumpLevelSupport: 'supported' | 'ignored') or pass an explicit version.`,
+  );
+}
+
+/** Resolves the bump level from `fragments`, applying the refusal guard above. */
+function resolveGuardedBumpLevel(config: ReleaseKitConfig, fragments: Fragment[]): BumpLevel {
+  const level = resolveBumpLevel(fragments.map((fragment) => fragment.kind), config.kinds);
+  assertBumpLevelSupported(config, level, fragments);
+  return level;
+}
+
 /** Returns `explicitVersion` trimmed, or the strategy's next version after the manifest's current version. */
 export function nextVersion(config: ReleaseKitConfig, explicitVersion?: string): string {
   const previousVersion = resolveVersion(config);
-  return String(explicitVersion || config.versionStrategy.next(previousVersion)).trim();
+  if (explicitVersion) {
+    return String(explicitVersion).trim();
+  }
+  const fragments = collectFragments(config);
+  const level = resolveGuardedBumpLevel(config, fragments);
+  return String(config.versionStrategy.next(previousVersion, { bump: level })).trim();
 }
 
 /** Shells out to `git rev-parse --short HEAD`; returns `""` if unavailable. */
@@ -74,7 +111,14 @@ export interface BumpVersionResult {
 export function bumpVersion(config: ReleaseKitConfig, options: BumpVersionOptions = {}): BumpVersionResult {
   const rootDir = path.resolve(config.rootDir);
   const previousVersion = config.manifest.readVersion(rootDir);
-  const version = String(options.version || config.versionStrategy.next(previousVersion)).trim();
+  let version: string;
+  if (options.version) {
+    version = String(options.version).trim();
+  } else {
+    const fragments = collectFragments(config);
+    const level = resolveGuardedBumpLevel(config, fragments);
+    version = String(config.versionStrategy.next(previousVersion, { bump: level })).trim();
+  }
   config.versionStrategy.assert(version);
   config.manifest.writeVersion(rootDir, version);
   return { previousVersion, version };
@@ -131,14 +175,23 @@ export function createReleaseArtifactV1(config: ReleaseKitConfig, result: Publis
     notesDigest: createHash('sha256').update(renderedNotes).digest('hex'), artifactRef: path.relative(rootDir, result.releasePath), fragmentCount: result.fragmentCount });
 }
 
-export function publishRelease(config: ReleaseKitConfig, options: PublishReleaseOptions = {}): PublishReleaseResult {
+/**
+ * Shared implementation behind `publishRelease`. `fragmentsOverride`, when
+ * passed, is used verbatim instead of re-collecting — so `cutRelease` can
+ * thread through the exact fragment set that already chose its version.
+ */
+function publishReleaseWithFragments(
+  config: ReleaseKitConfig,
+  options: PublishReleaseOptions,
+  fragmentsOverride?: Fragment[],
+): PublishReleaseResult {
   const version = resolveVersion(config, options.version);
   const date = options.date || todayIso();
   config.versionStrategy.assert(version);
   const paths = resolvePaths(config);
   fs.mkdirSync(paths.archiveDir, { recursive: true });
   fs.mkdirSync(paths.unreleasedDir, { recursive: true });
-  const fragments: Fragment[] = collectFragments(config);
+  const fragments: Fragment[] = fragmentsOverride ?? collectFragments(config);
   if (fragments.length === 0 && !options.allowEmpty) {
     throw new Error('No unreleased patch-note fragments found. Use --allow-empty to publish an empty note.');
   }
@@ -148,6 +201,10 @@ export function publishRelease(config: ReleaseKitConfig, options: PublishRelease
     { force: options.force },
   );
   return { version, releasePath, fragmentCount: fragments.length };
+}
+
+export function publishRelease(config: ReleaseKitConfig, options: PublishReleaseOptions = {}): PublishReleaseResult {
+  return publishReleaseWithFragments(config, options);
 }
 
 export interface ValidateReleaseStateResult {
@@ -196,12 +253,16 @@ export interface CutReleaseResult {
  * check is kept too (defense in depth against direct `publishRelease` calls
  * that bypass `cutRelease`).
  */
-function preflightCut(config: ReleaseKitConfig, targetVersion: string, options: CutReleaseOptions): { fragmentCount: number } {
+function preflightCut(
+  config: ReleaseKitConfig,
+  targetVersion: string,
+  options: CutReleaseOptions,
+  fragments: Fragment[],
+): { fragmentCount: number } {
   config.versionStrategy.assert(targetVersion);
   if (resolveNotesTarget(config).hasVersion(config, targetVersion) && !options.force) {
     throw new Error(`Release notes for ${targetVersion} already exist. Re-run with force to overwrite.`);
   }
-  const fragments = collectFragments(config);
   if (fragments.length === 0 && !options.allowEmpty) {
     throw new Error('No unreleased patch-note fragments found. Add fragments or pass --allow-empty.');
   }
@@ -212,19 +273,32 @@ function preflightCut(config: ReleaseKitConfig, targetVersion: string, options: 
  * Bumps the manifest to the next (or explicit) version, publishes fragments
  * into a versioned release file, and validates the result — rouge's exact
  * current order (bump -> publish -> validate), matching `cut-release.js`.
+ * Fragments are collected once here and threaded through preflight/publish,
+ * so the set that chose the version is provably the set that gets published.
  */
 export function cutRelease(config: ReleaseKitConfig, options: CutReleaseOptions = {}): CutReleaseResult {
   const previousVersion = resolveVersion(config);
-  const version = String(options.version || config.versionStrategy.next(previousVersion)).trim();
-  const preflight = preflightCut(config, version, options);
+  const fragments = collectFragments(config);
+  let version: string;
+  if (options.version) {
+    version = String(options.version).trim();
+  } else {
+    const level = resolveGuardedBumpLevel(config, fragments);
+    version = String(config.versionStrategy.next(previousVersion, { bump: level })).trim();
+  }
+  const preflight = preflightCut(config, version, options, fragments);
   bumpVersion(config, { version });
-  const release = publishRelease(config, {
-    version,
-    date: options.date,
-    commit: options.commit,
-    force: options.force,
-    allowEmpty: options.allowEmpty,
-  });
+  const release = publishReleaseWithFragments(
+    config,
+    {
+      version,
+      date: options.date,
+      commit: options.commit,
+      force: options.force,
+      allowEmpty: options.allowEmpty,
+    },
+    fragments,
+  );
   const validation = validateReleaseState(config, version);
   if (!validation.ok) {
     throw new Error(`Release ${version} was cut but failed validation:\n${validation.errors.join('\n')}`);

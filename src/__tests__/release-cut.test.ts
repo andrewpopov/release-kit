@@ -7,6 +7,11 @@ import path from 'node:path';
 import { bumpVersion, cutRelease } from '../publish';
 import { validateReleaseState } from '../publish';
 import { makeRougeConfig } from './fixtures/rougeConfig';
+import type { ReleaseKitConfig } from '../config';
+import type { VersionStrategy } from '../version';
+import { stableSemver } from '../version';
+import { npmPackage } from '../manifest';
+import { changelogTarget } from '../notes-target';
 
 function makeFixtureRoot(): string {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-kit-cut-'));
@@ -74,6 +79,151 @@ function writeFragment(rootDir: string): void {
     'utf8',
   );
 }
+
+function makeStableFixtureRoot(version: string): string {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-kit-stable-'));
+  fs.mkdirSync(path.join(rootDir, 'docs', 'patch-notes', 'unreleased'), { recursive: true });
+  fs.writeFileSync(
+    path.join(rootDir, 'package.json'),
+    `${JSON.stringify({ name: 'stable-app', version }, null, 2)}\n`,
+    'utf8',
+  );
+  return rootDir;
+}
+
+function writeStableFragment(rootDir: string, kind: string, fileName: string, summary: string): void {
+  fs.writeFileSync(
+    path.join(rootDir, 'docs', 'patch-notes', 'unreleased', fileName),
+    ['---', `kind: ${kind}`, `summary: ${summary}`, '---', '', 'Body text for the fragment.', ''].join('\n'),
+    'utf8',
+  );
+}
+
+function makeStableConfig(rootDir: string, versionStrategy: VersionStrategy): ReleaseKitConfig {
+  return {
+    productName: 'Stable App',
+    stage: 'stable',
+    rootDir,
+    paths: {
+      notesDir: 'docs/patch-notes',
+      indexPath: 'docs/PATCH_NOTES.md',
+    },
+    kinds: [
+      { id: 'breaking', heading: 'Breaking' },
+      { id: 'added', heading: 'Added' },
+      { id: 'fixed', heading: 'Fixed' },
+    ],
+    versionStrategy,
+    manifest: npmPackage(),
+    hygiene: {
+      baseRef: 'origin/master',
+      relevantPrefixes: [],
+      relevantFiles: [],
+      relevantScriptPrefixes: [],
+      relevantDocFiles: [],
+      noteCommandHelp: 'npm run release:note',
+      publishCommandHelp: 'npm run release:publish',
+    },
+    titleTemplate: '# {productName} {version}',
+    versionLabel: 'Version',
+    currentVersionLabel: 'Current version',
+    fragmentBodyPlaceholder: 'Describe the change in one short paragraph before publishing.',
+    releaseNoteIntroTemplate: 'Notes gathered from `{notesDir}/unreleased/`.',
+    indexIntroTemplate: 'Notes gathered from `{notesDir}/unreleased/*.md`.',
+    notesTarget: changelogTarget(),
+  };
+}
+
+/** A pre-existing (legacy) version strategy that never declares `bumpLevelSupport`. */
+function makeLegacyPatchStrategy(): VersionStrategy {
+  return {
+    assert(version: string): void {
+      if (!/^\d+\.\d+\.\d+$/.test(version)) {
+        throw new Error(`Version "${version}" must be X.Y.Z.`);
+      }
+    },
+    next(version: string): string {
+      const [major, minor, patch] = version.split('.').map(Number);
+      return `${major}.${minor}.${patch + 1}`;
+    },
+    compareDesc(a, b): number {
+      return String(b.version).localeCompare(String(a.version));
+    },
+    releaseFileName(version: string): string {
+      return `${version}.md`;
+    },
+  };
+}
+
+describe('release-cut: fragment-derived semver bump (PKG-96)', () => {
+  test('cutRelease with a breaking fragment derives a MINOR bump, not the old unconditional patch', () => {
+    const rootDir = makeStableFixtureRoot('0.14.0');
+    try {
+      writeStableFragment(rootDir, 'breaking', 'breaking-thing.md', 'Breaking change summary');
+      const config = makeStableConfig(rootDir, stableSemver());
+
+      const result = cutRelease(config, { date: '2026-07-16' });
+
+      expect(result.version).toBe('0.15.0');
+      expect(result.version).not.toBe('0.14.1');
+    } finally {
+      fs.rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  test('bumpVersion with an explicit version does not collect fragments (a malformed fragment does not block it)', () => {
+    const rootDir = makeStableFixtureRoot('1.0.0');
+    try {
+      writeStableFragment(rootDir, 'not-a-real-kind', 'malformed.md', 'Bad fragment');
+      const config = makeStableConfig(rootDir, stableSemver());
+
+      const result = bumpVersion(config, { version: '5.0.0' });
+
+      expect(result.version).toBe('5.0.0');
+    } finally {
+      fs.rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  test('refuses an implicit major cut when the version strategy does not declare bumpLevelSupport, naming the offending fragment', () => {
+    const rootDir = makeStableFixtureRoot('0.14.0');
+    try {
+      writeStableFragment(rootDir, 'breaking', 'breaking-thing.md', 'Breaking change summary');
+      const config = makeStableConfig(rootDir, makeLegacyPatchStrategy());
+
+      expect(() => cutRelease(config, { date: '2026-07-16' })).toThrow(
+        /Refusing to auto-version a major release[\s\S]*breaking\/breaking-thing\.md/,
+      );
+    } finally {
+      fs.rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  test('an "ignored" bumpLevelSupport strategy lets an implicit breaking cut through silently', () => {
+    const rootDir = makeStableFixtureRoot('0.14.0');
+    try {
+      writeStableFragment(rootDir, 'breaking', 'breaking-thing.md', 'Breaking change summary');
+      const strategy: VersionStrategy = { ...makeLegacyPatchStrategy(), bumpLevelSupport: 'ignored' };
+      const config = makeStableConfig(rootDir, strategy);
+
+      expect(() => cutRelease(config, { date: '2026-07-16' })).not.toThrow();
+    } finally {
+      fs.rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  test('an explicit version bypasses the refusal guard even without bumpLevelSupport', () => {
+    const rootDir = makeStableFixtureRoot('0.14.0');
+    try {
+      writeStableFragment(rootDir, 'breaking', 'breaking-thing.md', 'Breaking change summary');
+      const config = makeStableConfig(rootDir, makeLegacyPatchStrategy());
+
+      expect(() => cutRelease(config, { version: '9.9.9', date: '2026-07-16' })).not.toThrow();
+    } finally {
+      fs.rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe('release-cut (ported from rouge)', () => {
   test('bumpVersion rejects an invalid explicit version before mutating either manifest', () => {

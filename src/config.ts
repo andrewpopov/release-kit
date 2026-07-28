@@ -6,13 +6,18 @@
  */
 
 import path from 'node:path';
-import type { VersionStrategy } from './version';
+import type { BumpLevel, VersionStrategy } from './version';
 import type { VersionManifestAdapter } from './manifest';
 import type { ReleaseNotesTarget } from './notes-target';
 
 export interface ReleaseKindDef {
   id: string;
   heading: string;
+  /**
+   * Semantic weight of this kind. Omit to fall back to the conventional
+   * default for the id (see DEFAULT_KIND_BUMP in version.ts).
+   */
+  bump?: BumpLevel;
 }
 
 export interface HygieneConfig {

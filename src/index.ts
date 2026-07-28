@@ -4,8 +4,8 @@
 export { defineConfig, resolvePaths, notesDirPosix, releaseLinkPath, renderTitle, titleRegExp, applyTemplate } from './config';
 export type { ReleaseKitConfig, ReleaseKitPaths, ReleaseKindDef, HygieneConfig, ResolvedPaths } from './config';
 
-export { alphaSemver, stableSemver, ALPHA_VERSION_RE, STABLE_VERSION_RE } from './version';
-export type { VersionStrategy, AlphaSemverOptions, StableSemverOptions } from './version';
+export { alphaSemver, stableSemver, ALPHA_VERSION_RE, STABLE_VERSION_RE, resolveBumpLevel, DEFAULT_KIND_BUMP } from './version';
+export type { VersionStrategy, AlphaSemverOptions, StableSemverOptions, BumpLevel, VersionBumpContext } from './version';
 
 export { npmPackage } from './manifest';
 export type { VersionManifestAdapter, NpmPackageOptions } from './manifest';
