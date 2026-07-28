@@ -17,6 +17,13 @@ CHANGELOG entry.
 
 ---
 
+## 0.2.1
+
+- Manage release-kit's own releases with release-kit (dogfooding changelogTarget)
+  release-kit now cuts its own releases through its own `changelogTarget()`: describe each change as a fragment under `.changes/unreleased/` and run `npm run release:cut`. The config self-references the local build (`./dist/index.js`) since the package cannot depend on itself.
+- The release-kit CLI is executable again, and stays that way across builds.
+  `dist/cli.js` was committed as mode 100644, so a `github:` install linked `node_modules/.bin/release-kit` at a non-executable file and any invocation failed with `Permission denied`. The committed mode is now 100755, and `build` runs `chmod +x dist/cli.js` after `tsc` — without that, the next build would silently revert it, since `dist/` is generated and tsc writes 644.
+
 ## 0.2.0
 
 - Add a pluggable release-notes **target** seam (`ReleaseNotesTarget`).
