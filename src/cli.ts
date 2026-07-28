@@ -9,6 +9,7 @@ import path from 'node:path';
 import type { ReleaseKitConfig } from './config';
 import { checkReleaseHygiene } from './hygiene';
 import { collectFragments, todayIso, writeNewFragment } from './fragments';
+import { formatPackedBinFailures, verifyPackedBins } from './packed-bins';
 import { renderReleaseNote } from './render';
 import {
   bumpVersion,
@@ -30,13 +31,14 @@ interface ParsedArgs {
   summary: string;
   commit: string;
   base: string;
+  tarball: string;
   force: boolean;
   allowEmpty: boolean;
   help: boolean;
   json: boolean;
 }
 
-const VALUE_FLAGS = new Set(['--root', '--version', '--date', '--kind', '--slug', '--summary', '--commit', '--base']);
+const VALUE_FLAGS = new Set(['--root', '--version', '--date', '--kind', '--slug', '--summary', '--commit', '--base', '--tarball']);
 const VALUE_KEYS: Record<string, keyof ParsedArgs> = {
   '--root': 'rootDir',
   '--version': 'version',
@@ -46,9 +48,10 @@ const VALUE_KEYS: Record<string, keyof ParsedArgs> = {
   '--summary': 'summary',
   '--commit': 'commit',
   '--base': 'base',
+  '--tarball': 'tarball',
 };
 
-const VERBS = new Set(['note', 'notes', 'bump', 'publish', 'cut', 'check', 'hygiene']);
+const VERBS = new Set(['note', 'notes', 'bump', 'publish', 'cut', 'check', 'hygiene', 'verify-bins']);
 
 export function parseArgs(argv: string[]): ParsedArgs {
   const parsed: ParsedArgs = {
@@ -61,6 +64,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     summary: '',
     commit: '',
     base: '',
+    tarball: '',
     force: false,
     allowEmpty: false,
     help: false,
@@ -119,6 +123,7 @@ function writeHelp(stream: NodeJS.WritableStream): void {
       '  cut [--version <v>] [--force] [--allow-empty]      Bump, publish, and validate in one step',
       '  check [--version <v>]                              Validate the current release state',
       '  hygiene [--base <ref>]                             Check release-relevant changes have a patch note',
+      '  verify-bins [--tarball <path>]                     Assert every package.json#bin is executable in the packed tarball',
       '',
       'Options:',
       '  --root <dir>       Repo root (default: cwd, or the loaded config\'s rootDir)',
@@ -129,6 +134,7 @@ function writeHelp(stream: NodeJS.WritableStream): void {
       '  --slug <slug>      Fragment slug (for `note`)',
       '  --summary <text>   Fragment summary (for `note`)',
       '  --base <ref>       Base ref to diff against (for `hygiene`)',
+      '  --tarball <path>   Pre-packed tarball to check (for `verify-bins`)',
       '  --force            Overwrite an existing release file',
       '  --allow-empty      Allow publishing/cutting with no fragments',
       '  --json             Emit validated ReleaseArtifactV1 for publish/cut',
@@ -266,6 +272,21 @@ export function run(
         `\nFor release branches, run \`${config.hygiene.publishCommandHelp}\` so a versioned release note changes with the branch.\n`,
       );
       return 1;
+    }
+    case 'verify-bins': {
+      const result = verifyPackedBins({ rootDir, tarballPath: parsed.tarball });
+      if (!result.ok) {
+        stderr.write(`${formatPackedBinFailures(result)}\n`);
+        return 1;
+      }
+      if (result.findings.length === 0) {
+        stdout.write('release:verify-bins: ok - no bins declared.\n');
+      } else {
+        for (const finding of result.findings) {
+          stdout.write(`release:verify-bins: ok - ${finding.name} (${finding.entry}) is executable.\n`);
+        }
+      }
+      return 0;
     }
     default:
       return 1;
