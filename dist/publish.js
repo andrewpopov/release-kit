@@ -60,15 +60,26 @@ function resolveVersion(config, explicitVersion) {
  * inherits.
  */
 function assertBumpLevelSupported(config, level, fragments) {
-    if (level === 'patch' || config.versionStrategy.bumpLevelSupport !== undefined) {
+    if (level === 'patch') {
+        return;
+    }
+    // Allow-list the two declarations rather than testing `!== undefined`: a
+    // config loaded at runtime is not type-checked, so `false`, `null`, or a
+    // typo like 'support' would otherwise read as "declared" and wave a legacy
+    // patch-only strategy straight through — reintroducing the mislabeling.
+    const support = config.versionStrategy.bumpLevelSupport;
+    if (support === 'supported' || support === 'ignored') {
         return;
     }
     const offenders = fragments
         .filter((fragment) => (0, version_1.resolveBumpLevel)([fragment.kind], config.kinds) === level)
         .map((fragment) => `${fragment.kind}/${fragment.fileName}`)
         .join(', ');
-    throw new Error(`Refusing to auto-version a ${level} release: the configured version strategy does not ` +
-        `declare bumpLevelSupport, so release-kit cannot tell whether it honours fragment kinds. ` +
+    const declaration = support === undefined
+        ? 'does not declare bumpLevelSupport'
+        : `declares an invalid bumpLevelSupport ${JSON.stringify(support)}`;
+    throw new Error(`Refusing to auto-version a ${level} release: the configured version strategy ${declaration}, ` +
+        `so release-kit cannot tell whether it honours fragment kinds. ` +
         `Fragment(s) requiring a ${level} bump: ${offenders}. ` +
         `Upgrade the strategy (add bumpLevelSupport: 'supported' | 'ignored') or pass an explicit version.`);
 }
