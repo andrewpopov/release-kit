@@ -14,6 +14,7 @@ interface ParsedArgs {
     summary: string;
     commit: string;
     base: string;
+    tarball: string;
     force: boolean;
     allowEmpty: boolean;
     help: boolean;

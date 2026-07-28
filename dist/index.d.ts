@@ -22,3 +22,5 @@ export { classifyReleaseHygiene, collectChangedFiles, checkReleaseHygiene, isPat
 export type { HygieneResult, CheckReleaseHygieneOptions } from './hygiene';
 export { run as runCli, parseArgs as parseCliArgs } from './cli';
 export type { CliRunOptions } from './cli';
+export { verifyPackedBins, formatPackedBinFailures } from './packed-bins';
+export type { PackedBinFinding, VerifyPackedBinsResult, VerifyPackedBinsOptions } from './packed-bins';

@@ -14,9 +14,10 @@ const node_fs_1 = __importDefault(require("node:fs"));
 const node_path_1 = __importDefault(require("node:path"));
 const hygiene_1 = require("./hygiene");
 const fragments_1 = require("./fragments");
+const packed_bins_1 = require("./packed-bins");
 const render_1 = require("./render");
 const publish_1 = require("./publish");
-const VALUE_FLAGS = new Set(['--root', '--version', '--date', '--kind', '--slug', '--summary', '--commit', '--base']);
+const VALUE_FLAGS = new Set(['--root', '--version', '--date', '--kind', '--slug', '--summary', '--commit', '--base', '--tarball']);
 const VALUE_KEYS = {
     '--root': 'rootDir',
     '--version': 'version',
@@ -26,8 +27,9 @@ const VALUE_KEYS = {
     '--summary': 'summary',
     '--commit': 'commit',
     '--base': 'base',
+    '--tarball': 'tarball',
 };
-const VERBS = new Set(['note', 'notes', 'bump', 'publish', 'cut', 'check', 'hygiene']);
+const VERBS = new Set(['note', 'notes', 'bump', 'publish', 'cut', 'check', 'hygiene', 'verify-bins']);
 function parseArgs(argv) {
     const parsed = {
         verb: '',
@@ -39,6 +41,7 @@ function parseArgs(argv) {
         summary: '',
         commit: '',
         base: '',
+        tarball: '',
         force: false,
         allowEmpty: false,
         help: false,
@@ -97,6 +100,7 @@ function writeHelp(stream) {
         '  cut [--version <v>] [--force] [--allow-empty]      Bump, publish, and validate in one step',
         '  check [--version <v>]                              Validate the current release state',
         '  hygiene [--base <ref>]                             Check release-relevant changes have a patch note',
+        '  verify-bins [--tarball <path>]                     Assert every package.json#bin is executable in the packed tarball',
         '',
         'Options:',
         '  --root <dir>       Repo root (default: cwd, or the loaded config\'s rootDir)',
@@ -107,6 +111,7 @@ function writeHelp(stream) {
         '  --slug <slug>      Fragment slug (for `note`)',
         '  --summary <text>   Fragment summary (for `note`)',
         '  --base <ref>       Base ref to diff against (for `hygiene`)',
+        '  --tarball <path>   Pre-packed tarball to check (for `verify-bins`)',
         '  --force            Overwrite an existing release file',
         '  --allow-empty      Allow publishing/cutting with no fragments',
         '  --json             Emit validated ReleaseArtifactV1 for publish/cut',
@@ -226,6 +231,22 @@ function run(argv = process.argv.slice(2), stdout = process.stdout, stderr = pro
             stderr.write(`  ${config.hygiene.noteCommandHelp}\n`);
             stderr.write(`\nFor release branches, run \`${config.hygiene.publishCommandHelp}\` so a versioned release note changes with the branch.\n`);
             return 1;
+        }
+        case 'verify-bins': {
+            const result = (0, packed_bins_1.verifyPackedBins)({ rootDir, tarballPath: parsed.tarball });
+            if (!result.ok) {
+                stderr.write(`${(0, packed_bins_1.formatPackedBinFailures)(result)}\n`);
+                return 1;
+            }
+            if (result.findings.length === 0) {
+                stdout.write('release:verify-bins: ok - no bins declared.\n');
+            }
+            else {
+                for (const finding of result.findings) {
+                    stdout.write(`release:verify-bins: ok - ${finding.name} (${finding.entry}) is executable.\n`);
+                }
+            }
+            return 0;
         }
         default:
             return 1;

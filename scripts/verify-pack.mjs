@@ -7,7 +7,10 @@
  *   3. Native ESM `import { ... }` resolves the same named exports (this is
  *      what catches the "member-expression export" bug where cjs-module-lexer
  *      can't see the names for ESM consumers).
- *   4. The `release-kit` bin runs (`release-kit --help` exits 0).
+ *   4. Every package.json#bin is executable in the packed tarball itself
+ *      (npm install repairs a broken mode, so this must run against the
+ *      tarball, not the post-install file).
+ *   5. The `release-kit` bin runs (`release-kit --help` exits 0).
  *
  * Exits non-zero with a clear message on any failure.
  */
@@ -92,6 +95,15 @@ try {
   }
   console.log('[verify:pack] OK: dist/index.d.ts and dist/cli.js ship in tarball');
 
+  // 4. Every declared bin is executable in the tarball itself (npm install
+  // repairs a broken mode, so this must run before that repair happens).
+  const { verifyPackedBins, formatPackedBinFailures } = await import(new URL('../dist/index.js', import.meta.url));
+  const binsResult = verifyPackedBins({ rootDir: pkgRoot, tarballPath });
+  if (!binsResult.ok) {
+    fail(`packed bin(s) not executable:\n${formatPackedBinFailures(binsResult)}`);
+  }
+  console.log('[verify:pack] OK: every package.json#bin is executable in the packed tarball');
+
   // Set up a throwaway consumer project and install the tarball.
   const consumerDir = join(workDir, 'consumer');
   run('mkdir', ['-p', consumerDir]);
@@ -138,7 +150,7 @@ try {
   if (!esmOut.includes('ESM OK')) fail('ESM smoke did not report OK');
   console.log('[verify:pack] OK: ESM named imports resolve');
 
-  // 4. The `release-kit` bin runs.
+  // 5. The `release-kit` bin runs.
   const binPath = join(consumerDir, 'node_modules', '.bin', 'release-kit');
   if (!existsSync(binPath)) {
     fail('release-kit bin was not installed into node_modules/.bin');
