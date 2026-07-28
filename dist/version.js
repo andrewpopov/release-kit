@@ -7,9 +7,42 @@
  * stable releases (`X.Y.Z`, defaulting to a patch bump).
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.STABLE_VERSION_RE = exports.ALPHA_VERSION_RE = void 0;
+exports.STABLE_VERSION_RE = exports.ALPHA_VERSION_RE = exports.DEFAULT_KIND_BUMP = void 0;
+exports.resolveBumpLevel = resolveBumpLevel;
 exports.alphaSemver = alphaSemver;
 exports.stableSemver = stableSemver;
+/** Conventional weight for the well-known kind ids. Any other id defaults to 'patch'
+ *  and must declare `bump` on its ReleaseKindDef to weigh more. */
+exports.DEFAULT_KIND_BUMP = Object.freeze({
+    breaking: 'major',
+    added: 'minor',
+});
+const BUMP_RANK = Object.freeze({ major: 2, minor: 1, patch: 0 });
+/**
+ * Own-property lookup, NOT `bump in BUMP_RANK` — a runtime-loaded CJS config
+ * is not type-checked, and `in` would accept inherited `Object.prototype` keys
+ * (`"toString"`, `"constructor"`, ...), which then rank as `undefined` and
+ * silently degrade to a patch bump. That is the exact class of silent
+ * mislabeling this whole change exists to remove.
+ */
+function isBumpLevel(value) {
+    return typeof value === 'string' && Object.prototype.hasOwnProperty.call(BUMP_RANK, value);
+}
+/** Highest bump level across `kinds` for the given fragment kind ids. Empty → 'patch'. */
+function resolveBumpLevel(fragmentKindIds, kinds) {
+    let highest = 'patch';
+    for (const kindId of fragmentKindIds) {
+        const def = kinds.find((kind) => kind.id === kindId);
+        const bump = def?.bump ?? exports.DEFAULT_KIND_BUMP[kindId] ?? 'patch';
+        if (!isBumpLevel(bump)) {
+            throw new Error(`Kind "${kindId}" declares an unknown bump level "${String(bump)}". Expected one of: major, minor, patch.`);
+        }
+        if (BUMP_RANK[bump] > BUMP_RANK[highest]) {
+            highest = bump;
+        }
+    }
+    return highest;
+}
 /** `X.Y.Z-alpha.N` — matches rouge's `ALPHA_VERSION_RE` exactly. */
 exports.ALPHA_VERSION_RE = /^(\d+)\.(\d+)\.(\d+)-alpha\.(\d+)$/;
 /** `X.Y.Z` with numeric major, minor, and patch components. */
@@ -25,7 +58,10 @@ function alphaSemver(options = {}) {
             throw new Error(`${versionLabel} "${version}" must use alpha semver, for example 0.1.0-alpha.0.`);
         }
     }
-    function next(version) {
+    // Deliberate product policy: an alpha line bumps only its trailing counter,
+    // so a `breaking` fragment does not move the core version. Hence
+    // `bumpLevelSupport: 'ignored'` below — the context is accepted, not read.
+    function next(version, _context) {
         const match = String(version || '').match(exports.ALPHA_VERSION_RE);
         if (!match) {
             assert(version);
@@ -52,12 +88,19 @@ function alphaSemver(options = {}) {
             ? String(b.date || '').localeCompare(String(a.date || ''))
             : String(b.version || '').localeCompare(String(a.version || ''));
     }
-    return { assert, next, compareDesc, releaseFileName };
+    return { assert, next, compareDesc, releaseFileName, bumpLevelSupport: 'ignored' };
 }
 /**
  * Stable-semver version strategy: `1.0.0`, `1.0.1`, ...
- * `next()` increments the patch component. Callers can still supply an
- * explicit version to the release-kit bump/cut APIs for major or minor cuts.
+ * `next()` derives the bump from `context.bump` (default `'patch'`):
+ *  - `major` bumps the major component, EXCEPT pre-1.0 (`0.x.y`), where a
+ *    breaking change bumps minor instead — 0.x already declares an unstable
+ *    API, so there is no major to bump into.
+ *  - `minor` bumps the minor component and resets patch.
+ *  - `patch` (or an absent context) increments the patch component, matching
+ *    the previous unconditional behavior.
+ * Callers can still supply an explicit version to the release-kit bump/cut
+ * APIs to bypass this derivation entirely.
  */
 function stableSemver(options = {}) {
     const versionLabel = options.versionLabel ?? 'Version';
@@ -71,9 +114,19 @@ function stableSemver(options = {}) {
     function assert(version) {
         parse(version);
     }
-    function next(version) {
+    function next(version, context) {
         const match = parse(version);
-        return `${match[1]}.${match[2]}.${Number(match[3]) + 1}`;
+        const major = Number(match[1]);
+        const minor = Number(match[2]);
+        const patch = Number(match[3]);
+        const bump = context?.bump ?? 'patch';
+        if (bump === 'major') {
+            return major === 0 ? `0.${minor + 1}.0` : `${major + 1}.0.0`;
+        }
+        if (bump === 'minor') {
+            return `${major}.${minor + 1}.0`;
+        }
+        return `${major}.${minor}.${patch + 1}`;
     }
     function releaseFileName(version) {
         assert(version);
@@ -94,5 +147,5 @@ function stableSemver(options = {}) {
             ? String(b.date || '').localeCompare(String(a.date || ''))
             : String(b.version || '').localeCompare(String(a.version || ''));
     }
-    return { assert, next, compareDesc, releaseFileName };
+    return { assert, next, compareDesc, releaseFileName, bumpLevelSupport: 'supported' };
 }
