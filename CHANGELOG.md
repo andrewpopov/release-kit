@@ -17,6 +17,13 @@ CHANGELOG entry.
 
 ---
 
+## 0.3.0
+
+- The version bump is now derived from fragment kinds, so a breaking change no longer ships as a patch
+  `stableSemver().next()` incremented the patch component unconditionally, so `release:cut` labelled any batch as a patch no matter what was in it — deploy-kit shipped a breaking change as `0.14.1`. Fragment kinds are now read: a `breaking` fragment produces a major bump (a minor while pre-1.0, since `0.x` already declares an unstable API), `added` produces a minor, and anything else a patch. Declare `bump` on a `ReleaseKindDef` to weight a non-conventional kind id. An explicit `--version` still overrides everything. Two consequences for existing consumers: repos whose fragments include `added` or `breaking` will now see minor and major bumps where they previously saw patches, and a **custom** `VersionStrategy` must declare `bumpLevelSupport: 'supported' | 'ignored'` — release-kit refuses an implicit non-patch cut through a strategy that has not said whether it honours fragment kinds, rather than silently mislabeling the release.
+- verifyPackedBins() and a `verify-bins` CLI verb assert every package.json#bin is executable in the packed tarball
+  deploy-kit and release-kit each shipped a CLI at mode 644, giving every `github:` consumer `Permission denied`, and both repos' `verify:pack` claimed to check the bin and passed anyway. The reason is structural: `npm install` chmods a bin target to 755 on the way in, so a check that inspects an installed consumer tree — even one that spawns the installed binary — can never see the defect. Only the packed tarball carries the truth. `verifyPackedBins()` packs (or takes a pre-packed tarball), reads the stored mode of every declared `bin` target, and reports each one as missing or not-executable; `release-kit verify-bins` exposes it as a CLI. Packages that declare no `bin` pass trivially, so it drops into any repo's gate unchanged.
+
 ## 0.2.1
 
 - Manage release-kit's own releases with release-kit (dogfooding changelogTarget)
