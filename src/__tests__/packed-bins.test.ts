@@ -43,6 +43,31 @@ describe('verifyPackedBins', () => {
     }
   });
 
+  // The account that installs the package owns the extracted file, so Unix
+  // applies the OWNER triplet to it. A mode with group/other execute but no
+  // owner execute has an execute bit set and still fails with "Permission
+  // denied" for the only user who will ever run it — checking `mode & 0o111`
+  // would wave these straight through.
+  // (A mode with no owner READ bit, e.g. 0o011, is untestable here: `tar` cannot
+  // open the file to archive it, so the fixture itself cannot be built.)
+  test.each([
+    [0o655, '-rw-r-xr-x'],
+    [0o611, '-rw---x--x'],
+  ])('a mode-%s bin (%s) fails: execute bits exist but the owner has none', (mode) => {
+    const { rootDir, tarballPath, tempDir } = makeFixtureTarball(
+      { name: 'no-owner-exec', bin: { 'no-owner-exec': 'bin/cli.js' } },
+      { 'bin/cli.js': { mode } },
+    );
+    try {
+      const result = verifyPackedBins({ rootDir, tarballPath });
+      expect(result.ok).toBe(false);
+      expect(result.findings[0].reason).toBe('not-executable');
+      expect(formatPackedBinFailures(result)).toContain('no-owner-exec');
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   test('a 644 bin fails as not-executable and the failure names the bin and target path', () => {
     const { rootDir, tarballPath, tempDir } = makeFixtureTarball(
       { name: 'broken-pkg', bin: { 'broken-pkg': 'dist/cli.js' } },

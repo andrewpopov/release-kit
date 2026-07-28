@@ -64,7 +64,11 @@ function buildFinding(name, target, entries) {
         return { name, target, entry: null, mode: null, ok: false, reason: 'missing' };
     }
     const mode = parseSymbolicMode(matchLine.slice(0, 10));
-    const ok = (mode & 0o111) !== 0;
+    // OWNER execute (0o100), not "any execute bit" (0o111): the account that
+    // installs the package owns the extracted file, and Unix applies the owner
+    // triplet to it — so a mode like 0o655 (`-rw-r-xr-x`) has an execute bit set
+    // and still fails with "Permission denied" for the only user who matters.
+    const ok = (mode & 0o100) !== 0;
     return { name, target, entry: expectedEntry, mode, ok, reason: ok ? undefined : 'not-executable' };
 }
 function verifyPackedBins(options = {}) {
