@@ -72,7 +72,12 @@ function isPatchNoteArtifact(config, filePath) {
         return false;
     }
     return (normalized.startsWith(`${(0, config_1.notesDirPosix)(config)}/unreleased/`) ||
-        normalized.startsWith(`${(0, config_1.notesDirPosix)(config)}/releases/`));
+        normalized.startsWith(`${(0, config_1.notesDirPosix)(config)}/releases/`) ||
+        // A cut moves consumed fragments into archive/<version>/ (see
+        // archiveConsumedFragments in notes-target.ts) and empties unreleased/ —
+        // it's the same fragment file, just relocated, so it still counts as the
+        // patch-note artifact. Without this, no release branch can ever pass.
+        normalized.startsWith(`${(0, config_1.archiveDirPosix)(config)}/`));
 }
 function isReleaseRelevantFile(config, filePath) {
     const normalized = normalizePath(filePath);

@@ -8,7 +8,7 @@
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import type { ReleaseKitConfig } from './config';
-import { notesDirPosix } from './config';
+import { archiveDirPosix, notesDirPosix } from './config';
 
 export interface HygieneResult {
   ok: boolean;
@@ -80,7 +80,12 @@ export function isPatchNoteArtifact(config: ReleaseKitConfig, filePath: string):
   }
   return (
     normalized.startsWith(`${notesDirPosix(config)}/unreleased/`) ||
-    normalized.startsWith(`${notesDirPosix(config)}/releases/`)
+    normalized.startsWith(`${notesDirPosix(config)}/releases/`) ||
+    // A cut moves consumed fragments into archive/<version>/ (see
+    // archiveConsumedFragments in notes-target.ts) and empties unreleased/ —
+    // it's the same fragment file, just relocated, so it still counts as the
+    // patch-note artifact. Without this, no release branch can ever pass.
+    normalized.startsWith(`${archiveDirPosix(config)}/`)
   );
 }
 

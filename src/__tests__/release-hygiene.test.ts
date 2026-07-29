@@ -7,6 +7,11 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { classifyReleaseHygiene, checkReleaseHygiene, isPatchNoteArtifact } from '../hygiene';
 import { makeRougeConfig } from './fixtures/rougeConfig';
+import { cutRelease } from '../publish';
+import { changelogTarget } from '../notes-target';
+import { stableSemver } from '../version';
+import { npmPackage } from '../manifest';
+import type { ReleaseKitConfig } from '../config';
 
 function makeGitRoot(): string {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-kit-hygiene-'));
@@ -21,6 +26,35 @@ function makeGitRoot(): string {
 
 function git(cwd: string, args: string[]): void {
   execFileSync('git', args, { cwd, stdio: 'ignore' });
+}
+
+/** A minimal `changelogTarget()` config for the post-cut end-to-end test below. */
+function makeStableChangelogConfig(rootDir: string): ReleaseKitConfig {
+  return {
+    productName: 'Stable App',
+    stage: 'stable',
+    rootDir,
+    paths: { notesDir: 'docs/patch-notes', indexPath: 'docs/PATCH_NOTES.md' },
+    kinds: [{ id: 'fixed', heading: 'Fixed' }],
+    versionStrategy: stableSemver(),
+    manifest: npmPackage(),
+    hygiene: {
+      baseRef: 'HEAD',
+      relevantPrefixes: ['src/'],
+      relevantFiles: ['package.json'],
+      relevantScriptPrefixes: [],
+      relevantDocFiles: [],
+      noteCommandHelp: 'npm run release:note',
+      publishCommandHelp: 'npm run release:publish',
+    },
+    titleTemplate: '# {productName} {version}',
+    versionLabel: 'Version',
+    currentVersionLabel: 'Current version',
+    fragmentBodyPlaceholder: 'Describe the change in one short paragraph before publishing.',
+    releaseNoteIntroTemplate: 'Notes gathered from `{notesDir}/unreleased/`.',
+    indexIntroTemplate: 'Notes gathered from `{notesDir}/unreleased/*.md`.',
+    notesTarget: changelogTarget(),
+  };
 }
 
 function writeFragment(rootDir: string): void {
@@ -74,14 +108,27 @@ describe('release-hygiene (ported from rouge)', () => {
     expect(result.patchNoteFiles).toEqual(['docs/patch-notes/releases/0.1.0-alpha.1.md']);
   });
 
-  test('archived fragments alone do not satisfy release branches', () => {
+  test('archived fragments satisfy release branches (a cut relocates unreleased/ fragments to archive/<version>/)', () => {
     const config = makeRougeConfig('/unused');
     const result = classifyReleaseHygiene(config, [
       'package.json',
       'docs/patch-notes/archive/0.1.0-alpha.1/gameplay-combat-pacing.md',
     ]);
+    expect(result.ok).toBe(true);
+    expect(result.patchNoteFiles).toEqual(['docs/patch-notes/archive/0.1.0-alpha.1/gameplay-combat-pacing.md']);
+  });
+
+  test('a release-relevant change with no fragment anywhere (unreleased, releases, or archive) still fails', () => {
+    const config = makeRougeConfig('/unused');
+    const result = classifyReleaseHygiene(config, ['src/ui/town-view.ts']);
     expect(result.ok).toBe(false);
     expect(result.patchNoteFiles).toEqual([]);
+  });
+
+  test('README.md and files starting with `_` under archive/ are not fragments', () => {
+    const config = makeRougeConfig('/unused');
+    expect(isPatchNoteArtifact(config, 'docs/patch-notes/archive/0.1.0-alpha.1/README.md')).toBe(false);
+    expect(isPatchNoteArtifact(config, 'docs/patch-notes/archive/0.1.0-alpha.1/_internal.md')).toBe(false);
   });
 
   test('release tooling and deploy behavior are release-relevant', () => {
@@ -134,6 +181,48 @@ describe('release-hygiene (ported from rouge)', () => {
       const withFragment = checkReleaseHygiene(config, { baseRef: 'HEAD' });
       expect(withFragment.ok).toBe(true);
       expect(withFragment.patchNoteFiles).toEqual(['docs/patch-notes/unreleased/ops-release-hygiene.md']);
+    } finally {
+      fs.rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  // Reproduces the real bug: auth-kit's first release branch (src/ change +
+  // `release:cut` against `changelogTarget()`) reported "release-relevant
+  // changes need a patch-note artifact" and failed hygiene, because the cut
+  // moves the fragment out of unreleased/ into archive/<version>/ and
+  // isPatchNoteArtifact only recognized unreleased/ and releases/.
+  test('a branch that changed src/ and cut a release passes hygiene post-cut', () => {
+    const rootDir = makeGitRoot();
+    try {
+      fs.mkdirSync(path.join(rootDir, 'docs', 'patch-notes', 'unreleased'), { recursive: true });
+      fs.writeFileSync(path.join(rootDir, 'package.json'), `${JSON.stringify({ name: 'stable-app', version: '0.14.0' }, null, 2)}\n`, 'utf8');
+      fs.writeFileSync(path.join(rootDir, 'CHANGELOG.md'), '# Changelog\n', 'utf8');
+      git(rootDir, ['add', '.']);
+      git(rootDir, ['commit', '-q', '-m', 'baseline']);
+
+      const config = makeStableChangelogConfig(rootDir);
+
+      // Branch work: a src/ change plus its patch-note fragment.
+      fs.mkdirSync(path.join(rootDir, 'src'), { recursive: true });
+      fs.writeFileSync(path.join(rootDir, 'src', 'index.ts'), 'export {};\n', 'utf8');
+      fs.writeFileSync(
+        path.join(rootDir, 'docs', 'patch-notes', 'unreleased', 'fixed-thing.md'),
+        ['---', 'kind: fixed', 'summary: Fixed a thing', '---', '', 'Body text.', ''].join('\n'),
+        'utf8',
+      );
+      expect(checkReleaseHygiene(config, { baseRef: 'HEAD' }).ok).toBe(true);
+
+      cutRelease(config, { date: '2026-07-16' });
+
+      const unreleasedDir = path.join(rootDir, 'docs', 'patch-notes', 'unreleased');
+      expect(fs.readdirSync(unreleasedDir)).toEqual([]);
+      expect(fs.existsSync(path.join(rootDir, 'docs', 'patch-notes', 'archive', '0.14.1', 'fixed-thing.md'))).toBe(true);
+      expect(fs.readFileSync(path.join(rootDir, 'CHANGELOG.md'), 'utf8')).toContain('## 0.14.1');
+
+      const postCut = checkReleaseHygiene(config, { baseRef: 'HEAD' });
+      expect(postCut.ok).toBe(true);
+      expect(postCut.patchNoteFiles).toEqual(['docs/patch-notes/archive/0.14.1/fixed-thing.md']);
+      expect(postCut.relevantFiles).toEqual(['package.json', 'src/index.ts']);
     } finally {
       fs.rmSync(rootDir, { recursive: true, force: true });
     }

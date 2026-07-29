@@ -12,6 +12,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.defineConfig = defineConfig;
 exports.resolvePaths = resolvePaths;
 exports.notesDirPosix = notesDirPosix;
+exports.archiveDirPosix = archiveDirPosix;
 exports.releaseLinkPath = releaseLinkPath;
 exports.renderTitle = renderTitle;
 exports.titleRegExp = titleRegExp;
@@ -37,6 +38,16 @@ function resolvePaths(config) {
 /** POSIX-style join of the configured `notesDir` with extra path segments. */
 function notesDirPosix(config, ...segments) {
     return [config.paths.notesDir, ...segments].join('/');
+}
+/**
+ * POSIX-style path to the archive directory, derived from `resolvePaths`'s
+ * `archiveDir` (rather than re-hardcoding the `'archive'` segment here) so a
+ * repo that reconfigures the archive location stays consistent.
+ */
+function archiveDirPosix(config) {
+    const { notesDir, archiveDir } = resolvePaths(config);
+    const archiveSegment = node_path_1.default.relative(notesDir, archiveDir).split(node_path_1.default.sep).join('/');
+    return notesDirPosix(config, archiveSegment);
 }
 /**
  * Relative link (POSIX-style) from the patch-notes index file's directory to

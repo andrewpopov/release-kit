@@ -95,6 +95,12 @@ export declare function resolvePaths(config: ReleaseKitConfig): ResolvedPaths;
 /** POSIX-style join of the configured `notesDir` with extra path segments. */
 export declare function notesDirPosix(config: ReleaseKitConfig, ...segments: string[]): string;
 /**
+ * POSIX-style path to the archive directory, derived from `resolvePaths`'s
+ * `archiveDir` (rather than re-hardcoding the `'archive'` segment here) so a
+ * repo that reconfigures the archive location stays consistent.
+ */
+export declare function archiveDirPosix(config: ReleaseKitConfig): string;
+/**
  * Relative link (POSIX-style) from the patch-notes index file's directory to
  * a release file, e.g. `patch-notes/releases/0.1.0-alpha.3.md` when the
  * index lives at `docs/PATCH_NOTES.md` and the release lives under
