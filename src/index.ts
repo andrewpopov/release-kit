@@ -1,7 +1,7 @@
 // Shorthand re-exports (no renaming) so cjs-module-lexer statically detects
 // the named exports for ESM consumers of the CommonJS build.
 
-export { defineConfig, resolvePaths, notesDirPosix, releaseLinkPath, renderTitle, titleRegExp, applyTemplate } from './config';
+export { defineConfig, resolvePaths, notesDirPosix, archiveDirPosix, releaseLinkPath, renderTitle, titleRegExp, applyTemplate } from './config';
 export type { ReleaseKitConfig, ReleaseKitPaths, ReleaseKindDef, HygieneConfig, ResolvedPaths } from './config';
 
 export { alphaSemver, stableSemver, ALPHA_VERSION_RE, STABLE_VERSION_RE, resolveBumpLevel, DEFAULT_KIND_BUMP } from './version';
