@@ -233,6 +233,16 @@ function run(argv = process.argv.slice(2), stdout = process.stdout, stderr = pro
             return 1;
         }
         case 'verify-bins': {
+            // This check reads POSIX permission bits out of the packed tarball.
+            // Windows filesystems do not carry an executable bit, so `npm pack`
+            // records 644 for every entry and the check condemns bins that are
+            // correctly 100755 in git and executable for anyone on Linux or macOS.
+            // A guaranteed false failure is worse than no signal, so skip and say
+            // so. The check stays authoritative wherever a release is actually cut.
+            if (process.platform === 'win32') {
+                stdout.write('release:verify-bins: skipped on Windows - NTFS carries no executable bit, so every packed entry reads as 644 here. Run this on Linux or macOS before publishing.\n');
+                return 0;
+            }
             const result = (0, packed_bins_1.verifyPackedBins)({ rootDir, tarballPath: parsed.tarball });
             if (!result.ok) {
                 stderr.write(`${(0, packed_bins_1.formatPackedBinFailures)(result)}\n`);

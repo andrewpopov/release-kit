@@ -41,17 +41,42 @@ function parseSymbolicMode(field) {
     });
     return parseInt(digits.join(''), 8);
 }
+/**
+ * Run npm and return its stdout.
+ *
+ * On Windows the entry point is `npm.cmd`: `execFileSync('npm', …)` fails
+ * ENOENT because no PATHEXT is applied, and naming `npm.cmd` fails EINVAL
+ * because Node >= 20 refuses to spawn `.cmd` without a shell (the
+ * CVE-2024-27980 mitigation). So Windows goes through a shell. An args array
+ * alongside `shell: true` is deprecated (DEP0190) precisely because the args
+ * are concatenated rather than escaped, so the command line is built and
+ * quoted here instead — `destDir` is a temp path that can contain spaces.
+ */
+function runNpm(args, options) {
+    if (process.platform !== 'win32') {
+        return (0, node_child_process_1.execFileSync)('npm', args, { ...options, encoding: 'utf8' });
+    }
+    const quoted = args
+        .map((arg) => (/[\s"]/.test(arg) ? `"${arg.replace(/"/g, '\\"')}"` : arg))
+        .join(' ');
+    return (0, node_child_process_1.execSync)(`npm ${quoted}`, { ...options, encoding: 'utf8' });
+}
 function packTarball(rootDir, destDir) {
-    const output = (0, node_child_process_1.execFileSync)('npm', ['pack', '--json', '--pack-destination', destDir], {
+    const output = runNpm(['pack', '--json', '--pack-destination', destDir], {
         cwd: rootDir,
-        encoding: 'utf8',
         timeout: 120000,
     });
     const packInfo = JSON.parse(output);
     return node_path_1.default.join(destDir, packInfo[0].filename);
 }
 function listTarballEntries(tarballPath) {
-    const output = (0, node_child_process_1.execFileSync)('tar', ['-tvzf', tarballPath], {
+    // Run from the tarball's directory and pass only its name. GNU tar — which
+    // is what a Git-for-Windows install puts on PATH — reads a leading `C:` as
+    // a remote host spec and dies with "Cannot connect to C: resolve failed".
+    // Passing a bare filename sidesteps that without needing --force-local,
+    // which the bsdtar shipped with Windows does not accept.
+    const output = (0, node_child_process_1.execFileSync)('tar', ['-tvzf', node_path_1.default.basename(tarballPath)], {
+        cwd: node_path_1.default.dirname(tarballPath),
         encoding: 'utf8',
         timeout: 30000,
     });

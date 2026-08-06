@@ -22,9 +22,17 @@ function makeFixtureTarball(
     }
   }
   const tarballPath = path.join(tempDir, 'fixture.tgz');
-  execFileSync('tar', ['-czf', tarballPath, '-C', tempDir, 'package']);
+  // Bare filename plus cwd, not an absolute path: GNU tar (what Git for
+  // Windows puts on PATH) reads a leading `C:` as a remote host spec.
+  execFileSync('tar', ['-czf', path.basename(tarballPath), 'package'], { cwd: tempDir });
   return { rootDir: packageDir, tarballPath, tempDir };
 }
+
+// Fixtures that assert a NON-executable bin is rejected cannot be built on
+// Windows: NTFS has no executable bit, so fs.chmod(0o644) is a no-op and the
+// packed entry is indistinguishable from a correct 0o755 one. The rejection
+// path they cover is real and stays covered wherever releases are cut.
+const testOnPosix = process.platform === 'win32' ? test.skip : test;
 
 describe('verifyPackedBins', () => {
   test('a 755 bin passes with mode 0o755', () => {
@@ -50,7 +58,7 @@ describe('verifyPackedBins', () => {
   // would wave these straight through.
   // (A mode with no owner READ bit, e.g. 0o011, is untestable here: `tar` cannot
   // open the file to archive it, so the fixture itself cannot be built.)
-  test.each([
+  testOnPosix.each([
     [0o655, '-rw-r-xr-x'],
     [0o611, '-rw---x--x'],
   ])('a mode-%s bin (%s) fails: execute bits exist but the owner has none', (mode) => {
@@ -68,7 +76,7 @@ describe('verifyPackedBins', () => {
     }
   });
 
-  test('a 644 bin fails as not-executable and the failure names the bin and target path', () => {
+  testOnPosix('a 644 bin fails as not-executable and the failure names the bin and target path', () => {
     const { rootDir, tarballPath, tempDir } = makeFixtureTarball(
       { name: 'broken-pkg', bin: { 'broken-pkg': 'dist/cli.js' } },
       { 'dist/cli.js': { mode: 0o644 } },
@@ -124,7 +132,7 @@ describe('verifyPackedBins', () => {
     }
   });
 
-  test('multiple bins where only one is broken flags exactly that one', () => {
+  testOnPosix('multiple bins where only one is broken flags exactly that one', () => {
     const { rootDir, tarballPath, tempDir } = makeFixtureTarball(
       { name: 'multi-pkg', bin: { good: 'bin/good.js', bad: 'bin/bad.js' } },
       { 'bin/good.js': { mode: 0o755 }, 'bin/bad.js': { mode: 0o644 } },
@@ -141,7 +149,7 @@ describe('verifyPackedBins', () => {
     }
   });
 
-  test('end-to-end: a real `npm pack` of a fixture package with a 644 bin fails the check', () => {
+  testOnPosix('end-to-end: a real `npm pack` of a fixture package with a 644 bin fails the check', () => {
     const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-kit-packed-bins-e2e-'));
     try {
       fs.writeFileSync(

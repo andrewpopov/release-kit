@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 
 export interface PackedBinFinding {
   /** bin name as declared, e.g. `release-kit`. */
@@ -71,10 +71,30 @@ function parseSymbolicMode(field: string): number {
   return parseInt(digits.join(''), 8);
 }
 
+/**
+ * Run npm and return its stdout.
+ *
+ * On Windows the entry point is `npm.cmd`: `execFileSync('npm', …)` fails
+ * ENOENT because no PATHEXT is applied, and naming `npm.cmd` fails EINVAL
+ * because Node >= 20 refuses to spawn `.cmd` without a shell (the
+ * CVE-2024-27980 mitigation). So Windows goes through a shell. An args array
+ * alongside `shell: true` is deprecated (DEP0190) precisely because the args
+ * are concatenated rather than escaped, so the command line is built and
+ * quoted here instead — `destDir` is a temp path that can contain spaces.
+ */
+function runNpm(args: string[], options: { cwd: string; timeout: number }): string {
+  if (process.platform !== 'win32') {
+    return execFileSync('npm', args, { ...options, encoding: 'utf8' });
+  }
+  const quoted = args
+    .map((arg) => (/[\s"]/.test(arg) ? `"${arg.replace(/"/g, '\\"')}"` : arg))
+    .join(' ');
+  return execSync(`npm ${quoted}`, { ...options, encoding: 'utf8' });
+}
+
 function packTarball(rootDir: string, destDir: string): string {
-  const output = execFileSync('npm', ['pack', '--json', '--pack-destination', destDir], {
+  const output = runNpm(['pack', '--json', '--pack-destination', destDir], {
     cwd: rootDir,
-    encoding: 'utf8',
     timeout: 120000,
   });
   const packInfo = JSON.parse(output) as Array<{ filename: string }>;
@@ -82,7 +102,13 @@ function packTarball(rootDir: string, destDir: string): string {
 }
 
 function listTarballEntries(tarballPath: string): string[] {
-  const output = execFileSync('tar', ['-tvzf', tarballPath], {
+  // Run from the tarball's directory and pass only its name. GNU tar — which
+  // is what a Git-for-Windows install puts on PATH — reads a leading `C:` as
+  // a remote host spec and dies with "Cannot connect to C: resolve failed".
+  // Passing a bare filename sidesteps that without needing --force-local,
+  // which the bsdtar shipped with Windows does not accept.
+  const output = execFileSync('tar', ['-tvzf', path.basename(tarballPath)], {
+    cwd: path.dirname(tarballPath),
     encoding: 'utf8',
     timeout: 30000,
   });
