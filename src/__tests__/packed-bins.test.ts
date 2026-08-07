@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { formatPackedBinFailures, verifyPackedBins } from '../packed-bins';
+import { formatPackedBinFailures, verifyBinModesInGit, verifyPackedBins } from '../packed-bins';
 
 function makeFixtureTarball(
   pkgJson: Record<string, unknown>,
@@ -22,12 +22,29 @@ function makeFixtureTarball(
     }
   }
   const tarballPath = path.join(tempDir, 'fixture.tgz');
-  execFileSync('tar', ['-czf', tarballPath, '-C', tempDir, 'package']);
+  // Bare filename plus cwd, not an absolute path: GNU tar (what Git for
+  // Windows puts on PATH) reads a leading `C:` as a remote host spec.
+  execFileSync('tar', ['-czf', path.basename(tarballPath), 'package'], { cwd: tempDir });
   return { rootDir: packageDir, tarballPath, tempDir };
 }
 
+// Every mode-dependent fixture here is POSIX-only. On Windows the MSYS tar
+// that Git for Windows puts on PATH ignores fs.chmod entirely and derives the
+// executable bit from CONTENT: a file starting with `#!` is archived 0o755,
+// anything else 0o644. Verified directly - chmod 0o644 on a shebang file
+// still lands as -rwxr-xr-x, and chmod 0o755 on a non-shebang file lands as
+// -rw-r--r--. So a fixture cannot ask for a mode there: the negative cases
+// silently stop failing, and the positive ones would pass no matter which
+// mode they requested. Skipping is the honest option - the behaviour stays
+// covered wherever releases are actually cut.
+//
+// (npm pack is a separate story: it packs from the fs mode, so on Windows it
+// records 0o644 even for a shebang bin. That is why the verify-bins command
+// itself skips there.)
+const testOnPosix = process.platform === 'win32' ? test.skip : test;
+
 describe('verifyPackedBins', () => {
-  test('a 755 bin passes with mode 0o755', () => {
+  testOnPosix('a 755 bin passes with mode 0o755', () => {
     const { rootDir, tarballPath, tempDir } = makeFixtureTarball(
       { name: 'ok-pkg', bin: { 'ok-pkg': 'bin/cli.js' } },
       { 'bin/cli.js': { mode: 0o755 } },
@@ -50,7 +67,7 @@ describe('verifyPackedBins', () => {
   // would wave these straight through.
   // (A mode with no owner READ bit, e.g. 0o011, is untestable here: `tar` cannot
   // open the file to archive it, so the fixture itself cannot be built.)
-  test.each([
+  testOnPosix.each([
     [0o655, '-rw-r-xr-x'],
     [0o611, '-rw---x--x'],
   ])('a mode-%s bin (%s) fails: execute bits exist but the owner has none', (mode) => {
@@ -68,7 +85,7 @@ describe('verifyPackedBins', () => {
     }
   });
 
-  test('a 644 bin fails as not-executable and the failure names the bin and target path', () => {
+  testOnPosix('a 644 bin fails as not-executable and the failure names the bin and target path', () => {
     const { rootDir, tarballPath, tempDir } = makeFixtureTarball(
       { name: 'broken-pkg', bin: { 'broken-pkg': 'dist/cli.js' } },
       { 'dist/cli.js': { mode: 0o644 } },
@@ -111,7 +128,7 @@ describe('verifyPackedBins', () => {
     }
   });
 
-  test('string-form bin resolves to the package-name key', () => {
+  testOnPosix('string-form bin resolves to the package-name key', () => {
     const { rootDir, tarballPath, tempDir } = makeFixtureTarball({ name: 'string-bin-pkg', bin: 'cli.js' }, { 'cli.js': { mode: 0o755 } });
     try {
       const result = verifyPackedBins({ rootDir, tarballPath });
@@ -124,7 +141,7 @@ describe('verifyPackedBins', () => {
     }
   });
 
-  test('multiple bins where only one is broken flags exactly that one', () => {
+  testOnPosix('multiple bins where only one is broken flags exactly that one', () => {
     const { rootDir, tarballPath, tempDir } = makeFixtureTarball(
       { name: 'multi-pkg', bin: { good: 'bin/good.js', bad: 'bin/bad.js' } },
       { 'bin/good.js': { mode: 0o755 }, 'bin/bad.js': { mode: 0o644 } },
@@ -141,7 +158,7 @@ describe('verifyPackedBins', () => {
     }
   });
 
-  test('end-to-end: a real `npm pack` of a fixture package with a 644 bin fails the check', () => {
+  testOnPosix('end-to-end: a real `npm pack` of a fixture package with a 644 bin fails the check', () => {
     const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-kit-packed-bins-e2e-'));
     try {
       fs.writeFileSync(
@@ -165,6 +182,97 @@ describe('verifyPackedBins', () => {
           reason: 'not-executable',
         },
       ]);
+    } finally {
+      fs.rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// The Windows fallback: it reads the mode git RECORDED, so it works on every
+// platform and can be tested on every platform.
+describe('verifyBinModesInGit', () => {
+  function gitFixture(pkgJson: Record<string, unknown>, files: Record<string, string>, mode: '100644' | '100755') {
+    const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-kit-gitmode-'));
+    const git = (...args: string[]) =>
+      execFileSync('git', args, { cwd: rootDir, encoding: 'utf8', stdio: 'pipe' });
+    git('init', '-q', '.');
+    fs.writeFileSync(path.join(rootDir, 'package.json'), JSON.stringify(pkgJson, null, 2), 'utf8');
+    for (const [relativePath, content] of Object.entries(files)) {
+      const filePath = path.join(rootDir, relativePath);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, content, 'utf8');
+    }
+    git('add', '-A');
+    // Set the recorded mode explicitly so this does not depend on the host
+    // filesystem carrying an executable bit.
+    for (const relativePath of Object.keys(files)) {
+      git('update-index', `--chmod=${mode === '100755' ? '+x' : '-x'}`, relativePath);
+    }
+    return { rootDir };
+  }
+
+  test('a bin recorded 100755 in the index passes', () => {
+    const { rootDir } = gitFixture(
+      { name: 'git-ok', bin: { 'git-ok': 'bin/cli.js' } },
+      { 'bin/cli.js': '#!/usr/bin/env node\n' },
+      '100755',
+    );
+    try {
+      const result = verifyBinModesInGit({ rootDir });
+      expect(result.ok).toBe(true);
+      expect(result.findings[0].mode).toBe(0o755);
+    } finally {
+      fs.rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  test('a bin recorded 100644 in the index fails as not-executable', () => {
+    const { rootDir } = gitFixture(
+      { name: 'git-bad', bin: { 'git-bad': 'bin/cli.js' } },
+      { 'bin/cli.js': '#!/usr/bin/env node\n' },
+      '100644',
+    );
+    try {
+      const result = verifyBinModesInGit({ rootDir });
+      expect(result.ok).toBe(false);
+      expect(result.findings[0].reason).toBe('not-executable');
+      expect(formatPackedBinFailures(result)).toContain('git-bad');
+    } finally {
+      fs.rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  test('a bin that is not tracked at all is flagged missing', () => {
+    const { rootDir } = gitFixture(
+      { name: 'git-untracked', bin: { 'git-untracked': 'bin/absent.js' } },
+      { 'bin/present.js': '#!/usr/bin/env node\n' },
+      '100755',
+    );
+    try {
+      const result = verifyBinModesInGit({ rootDir });
+      expect(result.ok).toBe(false);
+      expect(result.findings[0].reason).toBe('missing');
+      expect(result.findings[0].mode).toBeNull();
+    } finally {
+      fs.rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  // Without `:(literal)`, git treats the declared target as a pathspec, so a
+  // wildcard globs onto a DIFFERENT indexed file and reports that file's mode
+  // instead. No file is literally named `bin/c*.js`, so the honest answer is
+  // `missing`; globbing would instead find `bin/cli.js` (recorded 100755) and
+  // wrongly report the bin as present and executable.
+  test('a bin path containing a wildcard is matched literally, not globbed', () => {
+    const { rootDir } = gitFixture(
+      { name: 'git-glob', bin: { 'git-glob': 'bin/c*.js' } },
+      { 'bin/cli.js': '#!/usr/bin/env node\n' },
+      '100755',
+    );
+    try {
+      const result = verifyBinModesInGit({ rootDir });
+      expect(result.ok).toBe(false);
+      expect(result.findings[0].reason).toBe('missing');
     } finally {
       fs.rmSync(rootDir, { recursive: true, force: true });
     }

@@ -233,7 +233,20 @@ function run(argv = process.argv.slice(2), stdout = process.stdout, stderr = pro
             return 1;
         }
         case 'verify-bins': {
-            const result = (0, packed_bins_1.verifyPackedBins)({ rootDir, tarballPath: parsed.tarball });
+            // The tarball check cannot run on Windows: `npm pack` reads the
+            // filesystem mode, NTFS has no executable bit, so every entry comes out
+            // 644 and every bin - including ones correctly recorded 100755 in git -
+            // is condemned. Rather than skip outright and rubber-stamp the release,
+            // fall back to the mode git RECORDED, which is platform-independent and
+            // is what a `github:owner/repo#vX` consumer actually receives. That is a
+            // weaker, source-level check, so it says so.
+            const onWindows = process.platform === 'win32';
+            if (onWindows) {
+                stdout.write('release:verify-bins: Windows - checking modes recorded in git, not the packed tarball (npm pack cannot preserve an executable bit here). Run on Linux or macOS to verify the artifact itself.\n');
+            }
+            const result = onWindows
+                ? (0, packed_bins_1.verifyBinModesInGit)({ rootDir })
+                : (0, packed_bins_1.verifyPackedBins)({ rootDir, tarballPath: parsed.tarball });
             if (!result.ok) {
                 stderr.write(`${(0, packed_bins_1.formatPackedBinFailures)(result)}\n`);
                 return 1;
