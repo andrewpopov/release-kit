@@ -28,14 +28,23 @@ function makeFixtureTarball(
   return { rootDir: packageDir, tarballPath, tempDir };
 }
 
-// Fixtures that assert a NON-executable bin is rejected cannot be built on
-// Windows: NTFS has no executable bit, so fs.chmod(0o644) is a no-op and the
-// packed entry is indistinguishable from a correct 0o755 one. The rejection
-// path they cover is real and stays covered wherever releases are cut.
+// Every mode-dependent fixture here is POSIX-only. On Windows the MSYS tar
+// that Git for Windows puts on PATH ignores fs.chmod entirely and derives the
+// executable bit from CONTENT: a file starting with `#!` is archived 0o755,
+// anything else 0o644. Verified directly - chmod 0o644 on a shebang file
+// still lands as -rwxr-xr-x, and chmod 0o755 on a non-shebang file lands as
+// -rw-r--r--. So a fixture cannot ask for a mode there: the negative cases
+// silently stop failing, and the positive ones would pass no matter which
+// mode they requested. Skipping is the honest option - the behaviour stays
+// covered wherever releases are actually cut.
+//
+// (npm pack is a separate story: it packs from the fs mode, so on Windows it
+// records 0o644 even for a shebang bin. That is why the verify-bins command
+// itself skips there.)
 const testOnPosix = process.platform === 'win32' ? test.skip : test;
 
 describe('verifyPackedBins', () => {
-  test('a 755 bin passes with mode 0o755', () => {
+  testOnPosix('a 755 bin passes with mode 0o755', () => {
     const { rootDir, tarballPath, tempDir } = makeFixtureTarball(
       { name: 'ok-pkg', bin: { 'ok-pkg': 'bin/cli.js' } },
       { 'bin/cli.js': { mode: 0o755 } },
@@ -119,7 +128,7 @@ describe('verifyPackedBins', () => {
     }
   });
 
-  test('string-form bin resolves to the package-name key', () => {
+  testOnPosix('string-form bin resolves to the package-name key', () => {
     const { rootDir, tarballPath, tempDir } = makeFixtureTarball({ name: 'string-bin-pkg', bin: 'cli.js' }, { 'cli.js': { mode: 0o755 } });
     try {
       const result = verifyPackedBins({ rootDir, tarballPath });

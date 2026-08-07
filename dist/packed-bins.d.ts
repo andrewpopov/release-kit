@@ -37,3 +37,20 @@ export interface VerifyPackedBinsOptions {
 export declare function verifyPackedBins(options?: VerifyPackedBinsOptions): VerifyPackedBinsResult;
 /** Multi-line, human-readable failure report; '' when `result.ok`. */
 export declare function formatPackedBinFailures(result: VerifyPackedBinsResult): string;
+/**
+ * Windows fallback: check the mode git has RECORDED for each declared bin.
+ *
+ * This is deliberately NOT equivalent to inspecting the packed tarball, and
+ * does not replace it. It exists because on Windows the tarball check cannot
+ * run at all — `npm pack` reads the filesystem mode, and NTFS has no
+ * executable bit, so every entry comes out 0o644 and every bin is condemned.
+ *
+ * Git records `100755` vs `100644` per file regardless of the OS that wrote
+ * it, and these packages are consumed as `github:owner/repo#vX` dependencies,
+ * so the mode in the tag is exactly what an installing consumer receives.
+ * That makes it a meaningful source-level check rather than a rubber stamp:
+ * it still catches a bin committed non-executable — the defect most likely to
+ * be introduced on Windows, where git will not infer the bit from the
+ * filesystem.
+ */
+export declare function verifyBinModesInGit(options?: VerifyPackedBinsOptions): VerifyPackedBinsResult;

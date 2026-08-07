@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync, execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 
 export interface PackedBinFinding {
   /** bin name as declared, e.g. `release-kit`. */
@@ -72,24 +72,33 @@ function parseSymbolicMode(field: string): number {
 }
 
 /**
- * Run npm and return its stdout.
+ * Locate npm's JavaScript entry point, so npm runs as a plain Node script
+ * rather than through a shell.
  *
- * On Windows the entry point is `npm.cmd`: `execFileSync('npm', …)` fails
- * ENOENT because no PATHEXT is applied, and naming `npm.cmd` fails EINVAL
+ * `execFileSync('npm', ...)` fails ENOENT on Windows - spawnSync applies no
+ * PATHEXT, so `npm.cmd` is never found - and naming `npm.cmd` fails EINVAL
  * because Node >= 20 refuses to spawn `.cmd` without a shell (the
- * CVE-2024-27980 mitigation). So Windows goes through a shell. An args array
- * alongside `shell: true` is deprecated (DEP0190) precisely because the args
- * are concatenated rather than escaped, so the command line is built and
- * quoted here instead — `destDir` is a temp path that can contain spaces.
+ * CVE-2024-27980 mitigation). Going through a shell instead would mean
+ * hand-quoting for cmd.exe, where a backslash does NOT escape a quote,
+ * `%VAR%` expands even inside quotes, and `& | < > ^ ( )` stay live in an
+ * unquoted argument. Temp paths and usernames can contain those, so that is a
+ * real injection surface rather than a theoretical one. Running the .js
+ * directly keeps an argv array end to end and needs no quoting anywhere.
  */
+function npmCliPath(): string | null {
+  const fromNpm = process.env.npm_execpath;
+  if (fromNpm && fromNpm.endsWith('.js') && fs.existsSync(fromNpm)) return fromNpm;
+  const bundled = path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+  return fs.existsSync(bundled) ? bundled : null;
+}
+
 function runNpm(args: string[], options: { cwd: string; timeout: number }): string {
-  if (process.platform !== 'win32') {
-    return execFileSync('npm', args, { ...options, encoding: 'utf8' });
+  const cli = npmCliPath();
+  if (cli) {
+    return execFileSync(process.execPath, [cli, ...args], { ...options, encoding: 'utf8' });
   }
-  const quoted = args
-    .map((arg) => (/[\s"]/.test(arg) ? `"${arg.replace(/"/g, '\\"')}"` : arg))
-    .join(' ');
-  return execSync(`npm ${quoted}`, { ...options, encoding: 'utf8' });
+  // POSIX fallback: there `npm` on PATH is a real executable.
+  return execFileSync('npm', args, { ...options, encoding: 'utf8' });
 }
 
 function packTarball(rootDir: string, destDir: string): string {
@@ -178,4 +187,51 @@ export function formatPackedBinFailures(result: VerifyPackedBinsResult): string 
       return `${finding.name}: ${finding.entry} is mode ${modeOctal}, not executable (consumers get "Permission denied")`;
     })
     .join('\n');
+}
+
+/**
+ * Windows fallback: check the mode git has RECORDED for each declared bin.
+ *
+ * This is deliberately NOT equivalent to inspecting the packed tarball, and
+ * does not replace it. It exists because on Windows the tarball check cannot
+ * run at all — `npm pack` reads the filesystem mode, and NTFS has no
+ * executable bit, so every entry comes out 0o644 and every bin is condemned.
+ *
+ * Git records `100755` vs `100644` per file regardless of the OS that wrote
+ * it, and these packages are consumed as `github:owner/repo#vX` dependencies,
+ * so the mode in the tag is exactly what an installing consumer receives.
+ * That makes it a meaningful source-level check rather than a rubber stamp:
+ * it still catches a bin committed non-executable — the defect most likely to
+ * be introduced on Windows, where git will not infer the bit from the
+ * filesystem.
+ */
+export function verifyBinModesInGit(options: VerifyPackedBinsOptions = {}): VerifyPackedBinsResult {
+  const rootDir = options.rootDir ?? process.cwd();
+  const manifest = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8'));
+  const findings: PackedBinFinding[] = Object.entries(normalizeBinField(manifest)).map(([name, target]) => {
+    let recorded: string;
+    try {
+      recorded = execFileSync('git', ['ls-files', '-s', '--', target], {
+        cwd: rootDir,
+        encoding: 'utf8',
+        timeout: 30000,
+      }).trim();
+    } catch {
+      recorded = '';
+    }
+    if (!recorded) {
+      return { name, target, entry: null, mode: null, ok: false, reason: 'missing' };
+    }
+    const mode = parseInt(recorded.slice(0, 6), 8) & 0o7777;
+    const ok = (mode & 0o100) !== 0;
+    return {
+      name,
+      target,
+      entry: target,
+      mode,
+      ok,
+      reason: ok ? undefined : 'not-executable',
+    };
+  });
+  return { ok: findings.every((finding) => finding.ok), tarballPath: '(git index)', findings };
 }
