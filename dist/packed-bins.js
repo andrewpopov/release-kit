@@ -58,8 +58,15 @@ function parseSymbolicMode(field) {
  */
 function npmCliPath() {
     const fromNpm = process.env.npm_execpath;
-    if (fromNpm && fromNpm.endsWith('.js') && node_fs_1.default.existsSync(fromNpm))
-        return fromNpm;
+    if (fromNpm && /\.js$/i.test(fromNpm)) {
+        // Resolve before testing: npm_execpath may be relative, and these calls
+        // run with an explicit cwd, so a bare existsSync could pass here and then
+        // fail to resolve when node starts it. Case-insensitive suffix because
+        // Windows paths may be spelled .JS.
+        const absolute = node_path_1.default.resolve(fromNpm);
+        if (node_fs_1.default.existsSync(absolute))
+            return absolute;
+    }
     const bundled = node_path_1.default.join(node_path_1.default.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
     return node_fs_1.default.existsSync(bundled) ? bundled : null;
 }
@@ -173,7 +180,11 @@ function verifyBinModesInGit(options = {}) {
     const findings = Object.entries(normalizeBinField(manifest)).map(([name, target]) => {
         let recorded;
         try {
-            recorded = (0, node_child_process_1.execFileSync)('git', ['ls-files', '-s', '--', target], {
+            // `:(literal)` disables pathspec magic. `--` only stops option
+            // parsing; without this a bin path containing `*`, `?`, `[` or a
+            // leading `:` would still be glob-matched and could report on a
+            // different indexed file than the one declared.
+            recorded = (0, node_child_process_1.execFileSync)('git', ['ls-files', '-s', '--', `:(literal)${target}`], {
                 cwd: rootDir,
                 encoding: 'utf8',
                 timeout: 30000,

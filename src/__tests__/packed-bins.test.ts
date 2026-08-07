@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { formatPackedBinFailures, verifyPackedBins } from '../packed-bins';
+import { formatPackedBinFailures, verifyBinModesInGit, verifyPackedBins } from '../packed-bins';
 
 function makeFixtureTarball(
   pkgJson: Record<string, unknown>,
@@ -182,6 +182,96 @@ describe('verifyPackedBins', () => {
           reason: 'not-executable',
         },
       ]);
+    } finally {
+      fs.rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// The Windows fallback: it reads the mode git RECORDED, so it works on every
+// platform and can be tested on every platform.
+describe('verifyBinModesInGit', () => {
+  function gitFixture(pkgJson: Record<string, unknown>, files: Record<string, string>, mode: '100644' | '100755') {
+    const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-kit-gitmode-'));
+    const git = (...args: string[]) =>
+      execFileSync('git', args, { cwd: rootDir, encoding: 'utf8', stdio: 'pipe' });
+    git('init', '-q', '.');
+    fs.writeFileSync(path.join(rootDir, 'package.json'), JSON.stringify(pkgJson, null, 2), 'utf8');
+    for (const [relativePath, content] of Object.entries(files)) {
+      const filePath = path.join(rootDir, relativePath);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, content, 'utf8');
+    }
+    git('add', '-A');
+    // Set the recorded mode explicitly so this does not depend on the host
+    // filesystem carrying an executable bit.
+    for (const relativePath of Object.keys(files)) {
+      git('update-index', `--chmod=${mode === '100755' ? '+x' : '-x'}`, relativePath);
+    }
+    return { rootDir };
+  }
+
+  test('a bin recorded 100755 in the index passes', () => {
+    const { rootDir } = gitFixture(
+      { name: 'git-ok', bin: { 'git-ok': 'bin/cli.js' } },
+      { 'bin/cli.js': '#!/usr/bin/env node\n' },
+      '100755',
+    );
+    try {
+      const result = verifyBinModesInGit({ rootDir });
+      expect(result.ok).toBe(true);
+      expect(result.findings[0].mode).toBe(0o755);
+    } finally {
+      fs.rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  test('a bin recorded 100644 in the index fails as not-executable', () => {
+    const { rootDir } = gitFixture(
+      { name: 'git-bad', bin: { 'git-bad': 'bin/cli.js' } },
+      { 'bin/cli.js': '#!/usr/bin/env node\n' },
+      '100644',
+    );
+    try {
+      const result = verifyBinModesInGit({ rootDir });
+      expect(result.ok).toBe(false);
+      expect(result.findings[0].reason).toBe('not-executable');
+      expect(formatPackedBinFailures(result)).toContain('git-bad');
+    } finally {
+      fs.rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  test('a bin that is not tracked at all is flagged missing', () => {
+    const { rootDir } = gitFixture(
+      { name: 'git-untracked', bin: { 'git-untracked': 'bin/absent.js' } },
+      { 'bin/present.js': '#!/usr/bin/env node\n' },
+      '100755',
+    );
+    try {
+      const result = verifyBinModesInGit({ rootDir });
+      expect(result.ok).toBe(false);
+      expect(result.findings[0].reason).toBe('missing');
+      expect(result.findings[0].mode).toBeNull();
+    } finally {
+      fs.rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  // Without `:(literal)`, git treats the declared target as a pathspec, so a
+  // wildcard would glob onto a DIFFERENT indexed file and report that file's
+  // mode instead. Here the only real match is non-executable; a glob would
+  // find the executable sibling and wrongly pass.
+  test('a bin path containing a wildcard is matched literally, not globbed', () => {
+    const { rootDir } = gitFixture(
+      { name: 'git-glob', bin: { 'git-glob': 'bin/c*.js' } },
+      { 'bin/cli.js': '#!/usr/bin/env node\n' },
+      '100755',
+    );
+    try {
+      const result = verifyBinModesInGit({ rootDir });
+      expect(result.ok).toBe(false);
+      expect(result.findings[0].reason).toBe('missing');
     } finally {
       fs.rmSync(rootDir, { recursive: true, force: true });
     }
