@@ -259,9 +259,10 @@ describe('verifyBinModesInGit', () => {
   });
 
   // Without `:(literal)`, git treats the declared target as a pathspec, so a
-  // wildcard would glob onto a DIFFERENT indexed file and report that file's
-  // mode instead. Here the only real match is non-executable; a glob would
-  // find the executable sibling and wrongly pass.
+  // wildcard globs onto a DIFFERENT indexed file and reports that file's mode
+  // instead. No file is literally named `bin/c*.js`, so the honest answer is
+  // `missing`; globbing would instead find `bin/cli.js` (recorded 100755) and
+  // wrongly report the bin as present and executable.
   test('a bin path containing a wildcard is matched literally, not globbed', () => {
     const { rootDir } = gitFixture(
       { name: 'git-glob', bin: { 'git-glob': 'bin/c*.js' } },
