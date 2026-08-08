@@ -71,12 +71,12 @@ function kindIds(kinds: ReleaseKindDef[]): Set<string> {
   return new Set(kinds.map((kind) => kind.id));
 }
 
-export function parseFragment(filePath: string, rootDir: string, kinds: ReleaseKindDef[]): Fragment {
+export function parseFragment(filePath: string, rootDir: string, config: ReleaseKitConfig): Fragment {
   const relativePath = path.relative(rootDir, filePath);
   const { meta, body } = parseFrontMatter(fs.readFileSync(filePath, 'utf8'), relativePath);
   const kind = String(meta.kind || '').trim();
   const summary = String(meta.summary || meta.title || '').trim();
-  const validKindIds = kindIds(kinds);
+  const validKindIds = kindIds(config.kinds);
   if (!validKindIds.has(kind)) {
     throw new Error(`${relativePath} has kind "${kind}". Expected one of: ${[...validKindIds].join(', ')}.`);
   }
@@ -85,6 +85,14 @@ export function parseFragment(filePath: string, rootDir: string, kinds: ReleaseK
   }
   if (!body) {
     throw new Error(`${relativePath} needs a short body paragraph.`);
+  }
+  if (body.trim() === String(config.fragmentBodyPlaceholder || '').trim()) {
+    throw new Error(
+      `${relativePath} body is still the scaffold placeholder — write the real impact paragraph.`,
+    );
+  }
+  if (summary.endsWith('.')) {
+    throw new Error(`${relativePath} summary must not end with '.' — the renderer emits '**{summary}:**'.`);
   }
   return { filePath, fileName: path.basename(filePath), kind, summary, body };
 }
@@ -98,7 +106,7 @@ export function collectFragments(config: ReleaseKitConfig): Fragment[] {
     .readdirSync(unreleasedDir)
     .filter(isFragmentFile)
     .sort((left, right) => left.localeCompare(right))
-    .map((fileName) => parseFragment(path.join(unreleasedDir, fileName), rootDir, config.kinds))
+    .map((fileName) => parseFragment(path.join(unreleasedDir, fileName), rootDir, config))
     .sort((left, right) => {
       const leftKind = config.kinds.findIndex((kind) => kind.id === left.kind);
       const rightKind = config.kinds.findIndex((kind) => kind.id === right.kind);

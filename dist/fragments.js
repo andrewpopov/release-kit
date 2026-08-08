@@ -63,12 +63,12 @@ function isFragmentFile(fileName) {
 function kindIds(kinds) {
     return new Set(kinds.map((kind) => kind.id));
 }
-function parseFragment(filePath, rootDir, kinds) {
+function parseFragment(filePath, rootDir, config) {
     const relativePath = node_path_1.default.relative(rootDir, filePath);
     const { meta, body } = parseFrontMatter(node_fs_1.default.readFileSync(filePath, 'utf8'), relativePath);
     const kind = String(meta.kind || '').trim();
     const summary = String(meta.summary || meta.title || '').trim();
-    const validKindIds = kindIds(kinds);
+    const validKindIds = kindIds(config.kinds);
     if (!validKindIds.has(kind)) {
         throw new Error(`${relativePath} has kind "${kind}". Expected one of: ${[...validKindIds].join(', ')}.`);
     }
@@ -77,6 +77,12 @@ function parseFragment(filePath, rootDir, kinds) {
     }
     if (!body) {
         throw new Error(`${relativePath} needs a short body paragraph.`);
+    }
+    if (body.trim() === String(config.fragmentBodyPlaceholder || '').trim()) {
+        throw new Error(`${relativePath} body is still the scaffold placeholder — write the real impact paragraph.`);
+    }
+    if (summary.endsWith('.')) {
+        throw new Error(`${relativePath} summary must not end with '.' — the renderer emits '**{summary}:**'.`);
     }
     return { filePath, fileName: node_path_1.default.basename(filePath), kind, summary, body };
 }
@@ -89,7 +95,7 @@ function collectFragments(config) {
         .readdirSync(unreleasedDir)
         .filter(isFragmentFile)
         .sort((left, right) => left.localeCompare(right))
-        .map((fileName) => parseFragment(node_path_1.default.join(unreleasedDir, fileName), rootDir, config.kinds))
+        .map((fileName) => parseFragment(node_path_1.default.join(unreleasedDir, fileName), rootDir, config))
         .sort((left, right) => {
         const leftKind = config.kinds.findIndex((kind) => kind.id === left.kind);
         const rightKind = config.kinds.findIndex((kind) => kind.id === right.kind);

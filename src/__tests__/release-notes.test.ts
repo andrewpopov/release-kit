@@ -206,13 +206,25 @@ describe('release-notes (ported from rouge)', () => {
     }
   });
 
-  test('writeNewFragment creates a parseable unreleased fragment', () => {
+  test('writeNewFragment creates a fragment that parses once the placeholder body is replaced', () => {
     const rootDir = makeFixtureRoot();
     try {
       const config = makeRougeConfig(rootDir);
       const fragmentPath = writeNewFragment(config, { kind: 'ui', slug: 'settings-polish', summary: 'Settings polish' });
 
       expect(path.basename(fragmentPath)).toBe('ui-settings-polish.md');
+
+      // A freshly scaffolded fragment still carries the placeholder body by
+      // design (scaffold, then edit) — release-kit now refuses to publish it
+      // as-is (PTRY-487), so collectFragments must reject the raw scaffold.
+      expect(() => collectFragments(config)).toThrow(/ui-settings-polish\.md body is still the scaffold placeholder/);
+
+      fs.writeFileSync(
+        fragmentPath,
+        fs.readFileSync(fragmentPath, 'utf8').replace(config.fragmentBodyPlaceholder, 'Polished the settings screen layout.'),
+        'utf8',
+      );
+
       const fragments = collectFragments(config);
       expect(fragments.length).toBe(1);
       expect(fragments[0].kind).toBe('ui');
