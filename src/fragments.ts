@@ -71,6 +71,28 @@ function kindIds(kinds: ReleaseKindDef[]): Set<string> {
   return new Set(kinds.map((kind) => kind.id));
 }
 
+/**
+ * Whether `body` is still the generated scaffold placeholder (`note` writes
+ * this exact text — see `writeNewFragment` below). Single definition shared
+ * by `parseFragment` (used by `check`/`publish`) and `hygiene`'s ratchet
+ * check, so the two can never disagree about what counts as unwritten.
+ */
+export function isPlaceholderBody(config: ReleaseKitConfig, body: string | undefined | null): boolean {
+  // Normalize BOTH sides: `parseFrontMatter` already folds CRLF to LF in the
+  // file body, so comparing it against an unnormalized config string would
+  // silently miss a multiline placeholder authored with CRLF.
+  const normalize = (value: string | undefined | null): string =>
+    String(value || '')
+      .replace(/\r\n/g, '\n')
+      .trim();
+  const placeholder = normalize(config.fragmentBodyPlaceholder);
+  // An unconfigured placeholder must never make every empty body "unwritten".
+  if (!placeholder) {
+    return false;
+  }
+  return normalize(body) === placeholder;
+}
+
 export function parseFragment(filePath: string, rootDir: string, config: ReleaseKitConfig): Fragment {
   const relativePath = path.relative(rootDir, filePath);
   const { meta, body } = parseFrontMatter(fs.readFileSync(filePath, 'utf8'), relativePath);
@@ -86,7 +108,7 @@ export function parseFragment(filePath: string, rootDir: string, config: Release
   if (!body) {
     throw new Error(`${relativePath} needs a short body paragraph.`);
   }
-  if (body.trim() === String(config.fragmentBodyPlaceholder || '').trim()) {
+  if (isPlaceholderBody(config, body)) {
     throw new Error(
       `${relativePath} body is still the scaffold placeholder — write the real impact paragraph.`,
     );

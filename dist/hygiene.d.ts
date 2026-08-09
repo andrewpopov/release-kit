@@ -12,6 +12,16 @@ export interface HygieneResult {
     patchNoteFiles: string[];
     relevantFiles: string[];
     requiresPatchNote: boolean;
+    /**
+     * Patch-note files that are part of THIS change (i.e. present in
+     * `patchNoteFiles`) and whose body is still the generated scaffold
+     * placeholder. Scoped to changed fragments only — a ratchet, not a
+     * retroactive check: a pre-existing placeholder fragment nobody touched
+     * this change is never read, so it can't fail a push that didn't add it.
+     * A fragment removed by this change (no longer on disk) is skipped too,
+     * since there is no body left to check.
+     */
+    placeholderPatchNoteFiles: string[];
 }
 export declare function collectChangedFiles(rootDir: string, baseRef: string): string[];
 export declare function isPatchNoteArtifact(config: ReleaseKitConfig, filePath: string): boolean;

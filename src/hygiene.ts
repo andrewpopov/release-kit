@@ -5,10 +5,12 @@
  * generic.
  */
 
+import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import type { ReleaseKitConfig } from './config';
 import { archiveDirPosix, notesDirPosix } from './config';
+import { isPlaceholderBody, parseFrontMatter } from './fragments';
 
 export interface HygieneResult {
   ok: boolean;
@@ -17,6 +19,16 @@ export interface HygieneResult {
   patchNoteFiles: string[];
   relevantFiles: string[];
   requiresPatchNote: boolean;
+  /**
+   * Patch-note files that are part of THIS change (i.e. present in
+   * `patchNoteFiles`) and whose body is still the generated scaffold
+   * placeholder. Scoped to changed fragments only — a ratchet, not a
+   * retroactive check: a pre-existing placeholder fragment nobody touched
+   * this change is never read, so it can't fail a push that didn't add it.
+   * A fragment removed by this change (no longer on disk) is skipped too,
+   * since there is no body left to check.
+   */
+  placeholderPatchNoteFiles: string[];
 }
 
 function normalizePath(filePath: string): string {
@@ -104,19 +116,44 @@ export function isReleaseRelevantFile(config: ReleaseKitConfig, filePath: string
   return relevantScriptPrefixes.some((prefix) => normalized.startsWith(prefix));
 }
 
+/**
+ * Reads a changed patch-note fragment's body off disk, or `undefined` if it
+ * can't be read — deleted by this change, or not a well-formed fragment.
+ * Either way there is nothing to validate, so callers should skip it rather
+ * than fail hygiene on it (full front-matter validation is `check`/
+ * `publish`'s job, not hygiene's).
+ */
+function readChangedFragmentBody(rootDir: string, relativeFilePath: string): string | undefined {
+  const absolutePath = path.resolve(rootDir, relativeFilePath);
+  if (!fs.existsSync(absolutePath)) {
+    return undefined;
+  }
+  try {
+    return parseFrontMatter(fs.readFileSync(absolutePath, 'utf8'), relativeFilePath).body;
+  } catch {
+    return undefined;
+  }
+}
+
 export function classifyReleaseHygiene(config: ReleaseKitConfig, changedFiles: string[]): HygieneResult {
   const normalizedChangedFiles = uniqueSorted(changedFiles || []);
   const patchNoteFiles = normalizedChangedFiles.filter((file) => isPatchNoteArtifact(config, file));
   const relevantFiles = normalizedChangedFiles.filter((file) => isReleaseRelevantFile(config, file));
   const requiresPatchNote = relevantFiles.length > 0;
   const hasPatchNoteUpdate = patchNoteFiles.length > 0;
+  const rootDir = path.resolve(config.rootDir);
+  const placeholderPatchNoteFiles = patchNoteFiles.filter((file) => {
+    const body = readChangedFragmentBody(rootDir, file);
+    return body !== undefined && isPlaceholderBody(config, body);
+  });
   return {
-    ok: !requiresPatchNote || hasPatchNoteUpdate,
+    ok: (!requiresPatchNote || hasPatchNoteUpdate) && placeholderPatchNoteFiles.length === 0,
     changedFiles: normalizedChangedFiles,
     hasPatchNoteUpdate,
     patchNoteFiles,
     relevantFiles,
     requiresPatchNote,
+    placeholderPatchNoteFiles,
   };
 }
 

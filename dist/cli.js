@@ -222,14 +222,29 @@ function run(argv = process.argv.slice(2), stdout = process.stdout, stderr = pro
                 }
                 return 0;
             }
-            stderr.write('release:hygiene: release-relevant changes need a patch-note artifact.\n');
-            stderr.write('Release-relevant files:\n');
-            for (const file of result.relevantFiles) {
-                stderr.write(`  - ${file}\n`);
+            const missingPatchNote = result.requiresPatchNote && !result.hasPatchNoteUpdate;
+            if (missingPatchNote) {
+                stderr.write('release:hygiene: release-relevant changes need a patch-note artifact.\n');
+                stderr.write('Release-relevant files:\n');
+                for (const file of result.relevantFiles) {
+                    stderr.write(`  - ${file}\n`);
+                }
+                stderr.write('\nAdd an unreleased fragment, for example:\n');
+                stderr.write(`  ${config.hygiene.noteCommandHelp}\n`);
+                stderr.write(`\nFor release branches, run \`${config.hygiene.publishCommandHelp}\` so a versioned release note changes with the branch.\n`);
             }
-            stderr.write('\nAdd an unreleased fragment, for example:\n');
-            stderr.write(`  ${config.hygiene.noteCommandHelp}\n`);
-            stderr.write(`\nFor release branches, run \`${config.hygiene.publishCommandHelp}\` so a versioned release note changes with the branch.\n`);
+            if (result.placeholderPatchNoteFiles.length > 0) {
+                if (missingPatchNote) {
+                    stderr.write('\n');
+                }
+                stderr.write('release:hygiene: patch-note fragment(s) added or modified by this change still hold the scaffold placeholder body.\n');
+                stderr.write('Placeholder fragment(s):\n');
+                for (const file of result.placeholderPatchNoteFiles) {
+                    stderr.write(`  - ${file}\n`);
+                }
+                stderr.write('\nWrite the real impact paragraph before pushing — see:\n');
+                stderr.write(`  ${config.hygiene.noteCommandHelp}\n`);
+            }
             return 1;
         }
         case 'verify-bins': {

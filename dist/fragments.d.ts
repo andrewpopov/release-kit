@@ -20,6 +20,13 @@ export declare function slugify(value: string | undefined | null): string;
 /** ISO date (`YYYY-MM-DD`) for `now` (defaults to the current time). */
 export declare function todayIso(now?: Date): string;
 export declare function isFragmentFile(fileName: string): boolean;
+/**
+ * Whether `body` is still the generated scaffold placeholder (`note` writes
+ * this exact text — see `writeNewFragment` below). Single definition shared
+ * by `parseFragment` (used by `check`/`publish`) and `hygiene`'s ratchet
+ * check, so the two can never disagree about what counts as unwritten.
+ */
+export declare function isPlaceholderBody(config: ReleaseKitConfig, body: string | undefined | null): boolean;
 export declare function parseFragment(filePath: string, rootDir: string, config: ReleaseKitConfig): Fragment;
 export declare function collectFragments(config: ReleaseKitConfig): Fragment[];
 export declare function normalizeFragmentBody(body: string | undefined | null): string;
