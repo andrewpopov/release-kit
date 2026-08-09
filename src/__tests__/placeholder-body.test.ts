@@ -8,7 +8,7 @@ import { describe, expect, test } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { collectFragments, writeNewFragment } from '../fragments';
+import { collectFragments, isPlaceholderBody, writeNewFragment } from '../fragments';
 import { cutRelease, validateReleaseState } from '../publish';
 import { classifyReleaseHygiene } from '../hygiene';
 import { makeRougeConfig } from './fixtures/rougeConfig';
@@ -144,5 +144,28 @@ describe('fragment body/summary validation (PTRY-487)', () => {
     } finally {
       fs.rmSync(rootDir, { recursive: true, force: true });
     }
+  });
+});
+
+// The file body is CRLF-normalized by `parseFrontMatter`, but the configured
+// placeholder is not — so comparing them raw silently misses a multiline
+// placeholder authored with CRLF, and the guard fails open on exactly the
+// fragment it exists to catch.
+describe('isPlaceholderBody normalization', () => {
+  test('a CRLF-authored multiline placeholder is still detected', () => {
+    const config = {
+      ...makeRougeConfig('/tmp/unused'),
+      fragmentBodyPlaceholder: 'Line one.\r\nLine two.',
+    } as ReleaseKitConfig;
+
+    expect(isPlaceholderBody(config, 'Line one.\nLine two.')).toBe(true);
+    expect(isPlaceholderBody(config, 'A real impact paragraph.')).toBe(false);
+  });
+
+  test('an unconfigured placeholder never flags a body, including an empty one', () => {
+    const config = { ...makeRougeConfig('/tmp/unused'), fragmentBodyPlaceholder: '' } as ReleaseKitConfig;
+
+    expect(isPlaceholderBody(config, '')).toBe(false);
+    expect(isPlaceholderBody(config, 'anything at all')).toBe(false);
   });
 });

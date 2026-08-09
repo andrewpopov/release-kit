@@ -71,7 +71,18 @@ function kindIds(kinds) {
  * check, so the two can never disagree about what counts as unwritten.
  */
 function isPlaceholderBody(config, body) {
-    return String(body || '').trim() === String(config.fragmentBodyPlaceholder || '').trim();
+    // Normalize BOTH sides: `parseFrontMatter` already folds CRLF to LF in the
+    // file body, so comparing it against an unnormalized config string would
+    // silently miss a multiline placeholder authored with CRLF.
+    const normalize = (value) => String(value || '')
+        .replace(/\r\n/g, '\n')
+        .trim();
+    const placeholder = normalize(config.fragmentBodyPlaceholder);
+    // An unconfigured placeholder must never make every empty body "unwritten".
+    if (!placeholder) {
+        return false;
+    }
+    return normalize(body) === placeholder;
 }
 function parseFragment(filePath, rootDir, config) {
     const relativePath = node_path_1.default.relative(rootDir, filePath);

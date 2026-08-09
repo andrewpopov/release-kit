@@ -78,7 +78,19 @@ function kindIds(kinds: ReleaseKindDef[]): Set<string> {
  * check, so the two can never disagree about what counts as unwritten.
  */
 export function isPlaceholderBody(config: ReleaseKitConfig, body: string | undefined | null): boolean {
-  return String(body || '').trim() === String(config.fragmentBodyPlaceholder || '').trim();
+  // Normalize BOTH sides: `parseFrontMatter` already folds CRLF to LF in the
+  // file body, so comparing it against an unnormalized config string would
+  // silently miss a multiline placeholder authored with CRLF.
+  const normalize = (value: string | undefined | null): string =>
+    String(value || '')
+      .replace(/\r\n/g, '\n')
+      .trim();
+  const placeholder = normalize(config.fragmentBodyPlaceholder);
+  // An unconfigured placeholder must never make every empty body "unwritten".
+  if (!placeholder) {
+    return false;
+  }
+  return normalize(body) === placeholder;
 }
 
 export function parseFragment(filePath: string, rootDir: string, config: ReleaseKitConfig): Fragment {
