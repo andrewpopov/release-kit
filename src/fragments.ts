@@ -71,6 +71,16 @@ function kindIds(kinds: ReleaseKindDef[]): Set<string> {
   return new Set(kinds.map((kind) => kind.id));
 }
 
+/**
+ * Whether `body` is still the generated scaffold placeholder (`note` writes
+ * this exact text — see `writeNewFragment` below). Single definition shared
+ * by `parseFragment` (used by `check`/`publish`) and `hygiene`'s ratchet
+ * check, so the two can never disagree about what counts as unwritten.
+ */
+export function isPlaceholderBody(config: ReleaseKitConfig, body: string | undefined | null): boolean {
+  return String(body || '').trim() === String(config.fragmentBodyPlaceholder || '').trim();
+}
+
 export function parseFragment(filePath: string, rootDir: string, config: ReleaseKitConfig): Fragment {
   const relativePath = path.relative(rootDir, filePath);
   const { meta, body } = parseFrontMatter(fs.readFileSync(filePath, 'utf8'), relativePath);
@@ -86,7 +96,7 @@ export function parseFragment(filePath: string, rootDir: string, config: Release
   if (!body) {
     throw new Error(`${relativePath} needs a short body paragraph.`);
   }
-  if (body.trim() === String(config.fragmentBodyPlaceholder || '').trim()) {
+  if (isPlaceholderBody(config, body)) {
     throw new Error(
       `${relativePath} body is still the scaffold placeholder — write the real impact paragraph.`,
     );

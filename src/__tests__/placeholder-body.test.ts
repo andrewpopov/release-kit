@@ -110,14 +110,24 @@ describe('fragment body/summary validation (PTRY-487)', () => {
     }
   });
 
-  test('a freshly scaffolded placeholder fragment does not break `hygiene` (path/presence checks only, no body parsing)', () => {
+  test('a freshly scaffolded placeholder fragment fails `hygiene` by name without throwing (hygiene ratchet)', () => {
+    // Was: "does not break hygiene (path/presence checks only, no body
+    // parsing)". hygiene now reads the body of fragments THIS change touches
+    // (still never throws — it reports via HygieneResult, same as every
+    // other hygiene failure mode) so a just-scaffolded placeholder is caught
+    // at push time instead of surviving until `check`/`publish` after a
+    // deploy.
     const { rootDir, config } = makeFixtureRoot();
     try {
       writeNewFragment(config, { kind: 'ui', slug: 'settings-polish', summary: 'Settings polish' });
 
-      expect(() =>
-        classifyReleaseHygiene(config, ['docs/patch-notes/unreleased/ui-settings-polish.md']),
-      ).not.toThrow();
+      let result: ReturnType<typeof classifyReleaseHygiene> | undefined;
+      expect(() => {
+        result = classifyReleaseHygiene(config, ['docs/patch-notes/unreleased/ui-settings-polish.md']);
+      }).not.toThrow();
+
+      expect(result?.ok).toBe(false);
+      expect(result?.placeholderPatchNoteFiles).toEqual(['docs/patch-notes/unreleased/ui-settings-polish.md']);
     } finally {
       fs.rmSync(rootDir, { recursive: true, force: true });
     }

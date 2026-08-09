@@ -228,3 +228,100 @@ describe('release-hygiene (ported from rouge)', () => {
     }
   });
 });
+
+// The gate asymmetry this closes: `hygiene` (run in consumers' pre-push
+// hooks) checked only that a patch-note fragment EXISTED, while `check`/
+// `publish` additionally rejected a scaffold-placeholder body — so a
+// placeholder fragment sailed through every push and only surfaced after a
+// production deploy, at release time. hygiene now rejects a placeholder body
+// too, but ONLY for fragments the current change adds or modifies: it must
+// not retroactively fail a push over pre-existing placeholder debt elsewhere
+// in the repo.
+describe('release-hygiene placeholder-body ratchet', () => {
+  function writeFragmentWithBody(rootDir: string, fileName: string, body: string): void {
+    const notesDir = path.join(rootDir, 'docs', 'patch-notes', 'unreleased');
+    fs.mkdirSync(notesDir, { recursive: true });
+    fs.writeFileSync(path.join(notesDir, fileName), ['---', 'kind: ops', 'summary: Release hygiene', '---', '', body, ''].join('\n'), 'utf8');
+  }
+
+  test('a changed fragment with a placeholder body fails hygiene, naming the file', () => {
+    const rootDir = makeGitRoot();
+    try {
+      const config = makeRougeConfig(rootDir);
+
+      fs.mkdirSync(path.join(rootDir, 'src'), { recursive: true });
+      fs.writeFileSync(path.join(rootDir, 'src', 'index.ts'), 'export {};\n', 'utf8');
+      writeFragmentWithBody(rootDir, 'ops-release-hygiene.md', config.fragmentBodyPlaceholder);
+
+      const result = checkReleaseHygiene(config, { baseRef: 'HEAD' });
+
+      expect(result.ok).toBe(false);
+      expect(result.placeholderPatchNoteFiles).toEqual(['docs/patch-notes/unreleased/ops-release-hygiene.md']);
+    } finally {
+      fs.rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  test('a changed fragment with a real body passes hygiene', () => {
+    const rootDir = makeGitRoot();
+    try {
+      const config = makeRougeConfig(rootDir);
+
+      fs.mkdirSync(path.join(rootDir, 'src'), { recursive: true });
+      fs.writeFileSync(path.join(rootDir, 'src', 'index.ts'), 'export {};\n', 'utf8');
+      writeFragmentWithBody(rootDir, 'ops-release-hygiene.md', 'Added release hygiene coverage for agent-authored changes.');
+
+      const result = checkReleaseHygiene(config, { baseRef: 'HEAD' });
+
+      expect(result.ok).toBe(true);
+      expect(result.placeholderPatchNoteFiles).toEqual([]);
+    } finally {
+      fs.rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  test('a pre-existing (unchanged) placeholder fragment does not fail hygiene — the ratchet', () => {
+    const rootDir = makeGitRoot();
+    try {
+      const config = makeRougeConfig(rootDir);
+
+      // Committed to the base branch already — nobody touched it in this change.
+      writeFragmentWithBody(rootDir, 'ops-old-debt.md', config.fragmentBodyPlaceholder);
+      git(rootDir, ['add', '.']);
+      git(rootDir, ['commit', '-q', '-m', 'pre-existing placeholder debt']);
+
+      // This change only touches src/ plus its OWN, properly-written fragment.
+      fs.mkdirSync(path.join(rootDir, 'src'), { recursive: true });
+      fs.writeFileSync(path.join(rootDir, 'src', 'index.ts'), 'export {};\n', 'utf8');
+      writeFragmentWithBody(rootDir, 'ops-release-hygiene.md', 'Added release hygiene coverage for agent-authored changes.');
+
+      const result = checkReleaseHygiene(config, { baseRef: 'HEAD' });
+
+      expect(result.ok).toBe(true);
+      expect(result.placeholderPatchNoteFiles).toEqual([]);
+    } finally {
+      fs.rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  test('a deleted fragment is not validated for a placeholder body', () => {
+    const rootDir = makeGitRoot();
+    try {
+      const config = makeRougeConfig(rootDir);
+
+      writeFragmentWithBody(rootDir, 'ops-retired.md', config.fragmentBodyPlaceholder);
+      git(rootDir, ['add', '.']);
+      git(rootDir, ['commit', '-q', '-m', 'add a placeholder fragment to remove']);
+
+      fs.rmSync(path.join(rootDir, 'docs', 'patch-notes', 'unreleased', 'ops-retired.md'));
+
+      const result = checkReleaseHygiene(config, { baseRef: 'HEAD' });
+
+      expect(result.patchNoteFiles).toEqual(['docs/patch-notes/unreleased/ops-retired.md']);
+      expect(result.placeholderPatchNoteFiles).toEqual([]);
+      expect(result.ok).toBe(true);
+    } finally {
+      fs.rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+});

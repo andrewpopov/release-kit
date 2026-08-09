@@ -14,9 +14,11 @@ exports.isPatchNoteArtifact = isPatchNoteArtifact;
 exports.isReleaseRelevantFile = isReleaseRelevantFile;
 exports.classifyReleaseHygiene = classifyReleaseHygiene;
 exports.checkReleaseHygiene = checkReleaseHygiene;
+const node_fs_1 = __importDefault(require("node:fs"));
 const node_path_1 = __importDefault(require("node:path"));
 const node_child_process_1 = require("node:child_process");
 const config_1 = require("./config");
+const fragments_1 = require("./fragments");
 function normalizePath(filePath) {
     return String(filePath || '')
         .trim()
@@ -93,19 +95,44 @@ function isReleaseRelevantFile(config, filePath) {
     }
     return relevantScriptPrefixes.some((prefix) => normalized.startsWith(prefix));
 }
+/**
+ * Reads a changed patch-note fragment's body off disk, or `undefined` if it
+ * can't be read — deleted by this change, or not a well-formed fragment.
+ * Either way there is nothing to validate, so callers should skip it rather
+ * than fail hygiene on it (full front-matter validation is `check`/
+ * `publish`'s job, not hygiene's).
+ */
+function readChangedFragmentBody(rootDir, relativeFilePath) {
+    const absolutePath = node_path_1.default.resolve(rootDir, relativeFilePath);
+    if (!node_fs_1.default.existsSync(absolutePath)) {
+        return undefined;
+    }
+    try {
+        return (0, fragments_1.parseFrontMatter)(node_fs_1.default.readFileSync(absolutePath, 'utf8'), relativeFilePath).body;
+    }
+    catch {
+        return undefined;
+    }
+}
 function classifyReleaseHygiene(config, changedFiles) {
     const normalizedChangedFiles = uniqueSorted(changedFiles || []);
     const patchNoteFiles = normalizedChangedFiles.filter((file) => isPatchNoteArtifact(config, file));
     const relevantFiles = normalizedChangedFiles.filter((file) => isReleaseRelevantFile(config, file));
     const requiresPatchNote = relevantFiles.length > 0;
     const hasPatchNoteUpdate = patchNoteFiles.length > 0;
+    const rootDir = node_path_1.default.resolve(config.rootDir);
+    const placeholderPatchNoteFiles = patchNoteFiles.filter((file) => {
+        const body = readChangedFragmentBody(rootDir, file);
+        return body !== undefined && (0, fragments_1.isPlaceholderBody)(config, body);
+    });
     return {
-        ok: !requiresPatchNote || hasPatchNoteUpdate,
+        ok: (!requiresPatchNote || hasPatchNoteUpdate) && placeholderPatchNoteFiles.length === 0,
         changedFiles: normalizedChangedFiles,
         hasPatchNoteUpdate,
         patchNoteFiles,
         relevantFiles,
         requiresPatchNote,
+        placeholderPatchNoteFiles,
     };
 }
 function checkReleaseHygiene(config, options = {}) {

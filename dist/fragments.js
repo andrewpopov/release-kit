@@ -12,6 +12,7 @@ exports.parseFrontMatter = parseFrontMatter;
 exports.slugify = slugify;
 exports.todayIso = todayIso;
 exports.isFragmentFile = isFragmentFile;
+exports.isPlaceholderBody = isPlaceholderBody;
 exports.parseFragment = parseFragment;
 exports.collectFragments = collectFragments;
 exports.normalizeFragmentBody = normalizeFragmentBody;
@@ -63,6 +64,15 @@ function isFragmentFile(fileName) {
 function kindIds(kinds) {
     return new Set(kinds.map((kind) => kind.id));
 }
+/**
+ * Whether `body` is still the generated scaffold placeholder (`note` writes
+ * this exact text — see `writeNewFragment` below). Single definition shared
+ * by `parseFragment` (used by `check`/`publish`) and `hygiene`'s ratchet
+ * check, so the two can never disagree about what counts as unwritten.
+ */
+function isPlaceholderBody(config, body) {
+    return String(body || '').trim() === String(config.fragmentBodyPlaceholder || '').trim();
+}
 function parseFragment(filePath, rootDir, config) {
     const relativePath = node_path_1.default.relative(rootDir, filePath);
     const { meta, body } = parseFrontMatter(node_fs_1.default.readFileSync(filePath, 'utf8'), relativePath);
@@ -78,7 +88,7 @@ function parseFragment(filePath, rootDir, config) {
     if (!body) {
         throw new Error(`${relativePath} needs a short body paragraph.`);
     }
-    if (body.trim() === String(config.fragmentBodyPlaceholder || '').trim()) {
+    if (isPlaceholderBody(config, body)) {
         throw new Error(`${relativePath} body is still the scaffold placeholder — write the real impact paragraph.`);
     }
     if (summary.endsWith('.')) {
