@@ -274,8 +274,9 @@ export function run(
           `\nFor release branches, run \`${config.hygiene.publishCommandHelp}\` so a versioned release note changes with the branch.\n`,
         );
       }
+      let printedAnySection = missingPatchNote;
       if (result.placeholderPatchNoteFiles.length > 0) {
-        if (missingPatchNote) {
+        if (printedAnySection) {
           stderr.write('\n');
         }
         stderr.write('release:hygiene: patch-note fragment(s) added or modified by this change still hold the scaffold placeholder body.\n');
@@ -284,6 +285,21 @@ export function run(
           stderr.write(`  - ${file}\n`);
         }
         stderr.write('\nWrite the real impact paragraph before pushing — see:\n');
+        stderr.write(`  ${config.hygiene.noteCommandHelp}\n`);
+        printedAnySection = true;
+      }
+      if (result.trailingPeriodSummaryPatchNoteFiles.length > 0) {
+        if (printedAnySection) {
+          stderr.write('\n');
+        }
+        stderr.write(
+          "release:hygiene: patch-note fragment(s) added or modified by this change have a summary ending in '.' — the renderer emits '**{summary}:**'.\n",
+        );
+        stderr.write('Fragment(s) with a trailing-period summary:\n');
+        for (const file of result.trailingPeriodSummaryPatchNoteFiles) {
+          stderr.write(`  - ${file}\n`);
+        }
+        stderr.write("\nRemove the trailing period from the summary before pushing — see:\n");
         stderr.write(`  ${config.hygiene.noteCommandHelp}\n`);
       }
       return 1;

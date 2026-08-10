@@ -10,7 +10,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import type { ReleaseKitConfig } from './config';
 import { archiveDirPosix, notesDirPosix } from './config';
-import { isPlaceholderBody, parseFrontMatter } from './fragments';
+import { extractSummary, parseFrontMatter, validateFragmentContent } from './fragments';
 
 export interface HygieneResult {
   ok: boolean;
@@ -29,6 +29,14 @@ export interface HygieneResult {
    * since there is no body left to check.
    */
   placeholderPatchNoteFiles: string[];
+  /**
+   * Patch-note files that are part of THIS change and whose summary ends in
+   * `.` — the renderer emits `**{summary}:**`, so a trailing period renders
+   * `**Summary.:**`. Same ratchet scoping as `placeholderPatchNoteFiles`: a
+   * pre-existing trailing-period fragment nobody touched this change is
+   * never read, and a fragment removed by this change is skipped.
+   */
+  trailingPeriodSummaryPatchNoteFiles: string[];
 }
 
 function normalizePath(filePath: string): string {
@@ -101,35 +109,105 @@ export function isPatchNoteArtifact(config: ReleaseKitConfig, filePath: string):
   );
 }
 
+/**
+ * Default `hygiene.excludePatterns` — test files. Every consuming repo's
+ * `relevantPrefixes` (e.g. `packages/web-app/src/`) sweeps in test files
+ * living under the same tree (`src/**\/__tests__/**`, `*.test.ts`,
+ * `*.spec.tsx`), so a change that adds ONLY tests was classified
+ * release-relevant and blocked at push time for a change no user can
+ * observe (PTRY-524).
+ */
+export const DEFAULT_HYGIENE_EXCLUDE_PATTERNS = ['**/__tests__/**', '**/__mocks__/**', '*.test.*', '*.spec.*'];
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Converts a small glob subset (`**` = any number of path segments including
+ * zero, `*` = any characters within one segment) to a RegExp. Handles a
+ * leading `**` + `/` and a trailing `/` + `**` specially so a pattern like
+ * `**` + `/__tests__/` + `**` also matches `__tests__/foo.ts` at the root
+ * (zero leading/trailing segments) — a plain `**` -> `.*` substitution would
+ * require a literal `/` on both sides and miss that case.
+ */
+function globToRegExp(glob: string): RegExp {
+  let body = glob;
+  let optionalPrefix = false;
+  let optionalSuffix = false;
+  if (body.startsWith('**/')) {
+    optionalPrefix = true;
+    body = body.slice(3);
+  }
+  if (body.endsWith('/**')) {
+    optionalSuffix = true;
+    body = body.slice(0, -3);
+  }
+  const DOUBLE_STAR = ' DOUBLE_STAR ';
+  const SINGLE_STAR = ' SINGLE_STAR ';
+  const tokenized = body.split('**').join(DOUBLE_STAR).split('*').join(SINGLE_STAR);
+  const escaped = escapeRegExp(tokenized).split(DOUBLE_STAR).join('.*').split(SINGLE_STAR).join('[^/]*');
+  const prefix = optionalPrefix ? '(?:.*/)?' : '';
+  const suffix = optionalSuffix ? '(?:/.*)?' : '';
+  return new RegExp(`^${prefix}${escaped}${suffix}$`);
+}
+
+/**
+ * Whether `normalizedPath` matches a single `excludePatterns` glob. A
+ * pattern containing `/` is matched against the full normalized path (it
+ * names a directory shape, e.g. `**\/__tests__/**`); a pattern with no `/` is
+ * matched against the basename only (it names a filename shape, e.g.
+ * `*.test.*`), the same convention `.gitignore` uses — otherwise a bare
+ * `*.test.*` could only ever match a file living at the repo root.
+ */
+export function matchesHygieneExcludePattern(pattern: string, normalizedPath: string): boolean {
+  const target = pattern.includes('/') ? normalizedPath : path.posix.basename(normalizedPath);
+  return globToRegExp(pattern).test(target);
+}
+
+function isExcludedFromRelevance(config: ReleaseKitConfig, normalizedPath: string): boolean {
+  const patterns = config.hygiene.excludePatterns ?? DEFAULT_HYGIENE_EXCLUDE_PATTERNS;
+  return patterns.some((pattern) => matchesHygieneExcludePattern(pattern, normalizedPath));
+}
+
 export function isReleaseRelevantFile(config: ReleaseKitConfig, filePath: string): boolean {
   const normalized = normalizePath(filePath);
   if (!normalized || isPatchNoteArtifact(config, normalized)) {
     return false;
   }
   const { relevantFiles, relevantDocFiles, relevantPrefixes, relevantScriptPrefixes } = config.hygiene;
+  // Exact, curated file lists are a deliberate opt-in by the repo owner — a
+  // default exclude pattern must never override that, so exclusion is
+  // checked only for the broad prefix matches below (see the `excludePatterns`
+  // doc comment on `HygieneConfig` for the full reasoning).
   if (relevantFiles.includes(normalized) || relevantDocFiles.includes(normalized)) {
     return true;
   }
-  if (relevantPrefixes.some((prefix) => normalized.startsWith(prefix))) {
-    return true;
-  }
-  return relevantScriptPrefixes.some((prefix) => normalized.startsWith(prefix));
+  const matchesPrefix =
+    relevantPrefixes.some((prefix) => normalized.startsWith(prefix)) ||
+    relevantScriptPrefixes.some((prefix) => normalized.startsWith(prefix));
+  return matchesPrefix && !isExcludedFromRelevance(config, normalized);
 }
 
 /**
- * Reads a changed patch-note fragment's body off disk, or `undefined` if it
- * can't be read — deleted by this change, or not a well-formed fragment.
- * Either way there is nothing to validate, so callers should skip it rather
- * than fail hygiene on it (full front-matter validation is `check`/
- * `publish`'s job, not hygiene's).
+ * Reads a changed patch-note fragment's summary/body off disk, or
+ * `undefined` if it can't be read — deleted by this change, or not a
+ * well-formed fragment. Either way there is nothing to validate, so callers
+ * should skip it rather than fail hygiene on it (full front-matter
+ * validation, e.g. kind/presence checks, is `check`/`publish`'s job, not
+ * hygiene's).
  */
-function readChangedFragmentBody(rootDir: string, relativeFilePath: string): string | undefined {
+function readChangedFragmentContent(
+  rootDir: string,
+  relativeFilePath: string,
+): { summary: string; body: string } | undefined {
   const absolutePath = path.resolve(rootDir, relativeFilePath);
   if (!fs.existsSync(absolutePath)) {
     return undefined;
   }
   try {
-    return parseFrontMatter(fs.readFileSync(absolutePath, 'utf8'), relativeFilePath).body;
+    const { meta, body } = parseFrontMatter(fs.readFileSync(absolutePath, 'utf8'), relativeFilePath);
+    return { summary: extractSummary(meta), body };
   } catch {
     return undefined;
   }
@@ -142,18 +220,28 @@ export function classifyReleaseHygiene(config: ReleaseKitConfig, changedFiles: s
   const requiresPatchNote = relevantFiles.length > 0;
   const hasPatchNoteUpdate = patchNoteFiles.length > 0;
   const rootDir = path.resolve(config.rootDir);
-  const placeholderPatchNoteFiles = patchNoteFiles.filter((file) => {
-    const body = readChangedFragmentBody(rootDir, file);
-    return body !== undefined && isPlaceholderBody(config, body);
+  const changedFragmentIssues = patchNoteFiles.map((file) => {
+    const content = readChangedFragmentContent(rootDir, file);
+    return { file, issues: content ? validateFragmentContent(config, content) : [] };
   });
+  const placeholderPatchNoteFiles = changedFragmentIssues
+    .filter(({ issues }) => issues.some((issue) => issue.code === 'placeholder-body'))
+    .map(({ file }) => file);
+  const trailingPeriodSummaryPatchNoteFiles = changedFragmentIssues
+    .filter(({ issues }) => issues.some((issue) => issue.code === 'trailing-period-summary'))
+    .map(({ file }) => file);
   return {
-    ok: (!requiresPatchNote || hasPatchNoteUpdate) && placeholderPatchNoteFiles.length === 0,
+    ok:
+      (!requiresPatchNote || hasPatchNoteUpdate) &&
+      placeholderPatchNoteFiles.length === 0 &&
+      trailingPeriodSummaryPatchNoteFiles.length === 0,
     changedFiles: normalizedChangedFiles,
     hasPatchNoteUpdate,
     patchNoteFiles,
     relevantFiles,
     requiresPatchNote,
     placeholderPatchNoteFiles,
+    trailingPeriodSummaryPatchNoteFiles,
   };
 }
 

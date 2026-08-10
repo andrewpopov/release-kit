@@ -27,6 +27,18 @@ export interface HygieneConfig {
     relevantScriptPrefixes: string[];
     /** Exact relative doc file paths that are release-process docs. */
     relevantDocFiles: string[];
+    /**
+     * Glob patterns (see `matchesHygieneExcludePattern` in `hygiene.ts`) for
+     * paths that never require a patch note even when they fall under a
+     * `relevantPrefixes`/`relevantScriptPrefixes` match — e.g. a test-only
+     * change under `src/`. Applies ONLY to the prefix-based checks, never to
+     * `relevantFiles`/`relevantDocFiles`: those are exact paths a repo curated
+     * on purpose, an explicit opt-in that should win over a default exclusion.
+     * Optional and defaults to `DEFAULT_HYGIENE_EXCLUDE_PATTERNS` (test files)
+     * when omitted, so existing configs are unaffected. Set to `[]` to disable
+     * exclusion entirely.
+     */
+    excludePatterns?: string[];
     /** Example `release-kit note ...` invocation shown in the hygiene failure help text. */
     noteCommandHelp: string;
     /** Example publish command shown in the hygiene failure help text. */

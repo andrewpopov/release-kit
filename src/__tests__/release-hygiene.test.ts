@@ -325,3 +325,176 @@ describe('release-hygiene placeholder-body ratchet', () => {
     }
   });
 });
+
+// PTRY-526: hygiene checked that a fragment existed and had a written body,
+// but never that its summary was renderable. `parseFragment` (used by
+// `check`/`publish`) has always rejected a summary ending in '.' — the
+// renderer emits `**{summary}:**`, so a trailing period renders
+// `**Summary.:**` — but hygiene never applied that rule, so a trailing-period
+// summary sailed through every push and only surfaced at check/publish time,
+// after a production deploy. hygiene now rejects it too, scoped to only the
+// fragments the current change adds or modifies, via the same
+// `validateFragmentContent` helper `parseFragment` uses, so the two paths
+// cannot drift apart the way they just did for the placeholder-body rule.
+describe('release-hygiene summary trailing-period ratchet', () => {
+  function writeFragmentWithSummary(rootDir: string, fileName: string, summary: string): void {
+    const notesDir = path.join(rootDir, 'docs', 'patch-notes', 'unreleased');
+    fs.mkdirSync(notesDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(notesDir, fileName),
+      ['---', 'kind: ops', `summary: ${summary}`, '---', '', 'A real impact paragraph.', ''].join('\n'),
+      'utf8',
+    );
+  }
+
+  test('a changed fragment with a trailing-period summary fails hygiene, naming the file', () => {
+    const rootDir = makeGitRoot();
+    try {
+      const config = makeRougeConfig(rootDir);
+
+      fs.mkdirSync(path.join(rootDir, 'src'), { recursive: true });
+      fs.writeFileSync(path.join(rootDir, 'src', 'index.ts'), 'export {};\n', 'utf8');
+      writeFragmentWithSummary(rootDir, 'ops-release-hygiene.md', 'Release hygiene summary.');
+
+      const result = checkReleaseHygiene(config, { baseRef: 'HEAD' });
+
+      expect(result.ok).toBe(false);
+      expect(result.trailingPeriodSummaryPatchNoteFiles).toEqual(['docs/patch-notes/unreleased/ops-release-hygiene.md']);
+      expect(result.placeholderPatchNoteFiles).toEqual([]);
+    } finally {
+      fs.rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  test('a changed fragment with a clean summary passes hygiene', () => {
+    const rootDir = makeGitRoot();
+    try {
+      const config = makeRougeConfig(rootDir);
+
+      fs.mkdirSync(path.join(rootDir, 'src'), { recursive: true });
+      fs.writeFileSync(path.join(rootDir, 'src', 'index.ts'), 'export {};\n', 'utf8');
+      writeFragmentWithSummary(rootDir, 'ops-release-hygiene.md', 'Release hygiene summary');
+
+      const result = checkReleaseHygiene(config, { baseRef: 'HEAD' });
+
+      expect(result.ok).toBe(true);
+      expect(result.trailingPeriodSummaryPatchNoteFiles).toEqual([]);
+    } finally {
+      fs.rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  test('a pre-existing (unchanged) trailing-period fragment does not fail hygiene — the ratchet', () => {
+    const rootDir = makeGitRoot();
+    try {
+      const config = makeRougeConfig(rootDir);
+
+      // Committed to the base branch already — nobody touched it in this change.
+      writeFragmentWithSummary(rootDir, 'ops-old-debt.md', 'Old debt summary.');
+      git(rootDir, ['add', '.']);
+      git(rootDir, ['commit', '-q', '-m', 'pre-existing trailing-period debt']);
+
+      // This change only touches src/ plus its OWN, properly-written fragment.
+      fs.mkdirSync(path.join(rootDir, 'src'), { recursive: true });
+      fs.writeFileSync(path.join(rootDir, 'src', 'index.ts'), 'export {};\n', 'utf8');
+      writeFragmentWithSummary(rootDir, 'ops-release-hygiene.md', 'Release hygiene summary');
+
+      const result = checkReleaseHygiene(config, { baseRef: 'HEAD' });
+
+      expect(result.ok).toBe(true);
+      expect(result.trailingPeriodSummaryPatchNoteFiles).toEqual([]);
+    } finally {
+      fs.rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  test('a deleted fragment is not validated for a trailing-period summary', () => {
+    const rootDir = makeGitRoot();
+    try {
+      const config = makeRougeConfig(rootDir);
+
+      writeFragmentWithSummary(rootDir, 'ops-retired.md', 'Retired summary.');
+      git(rootDir, ['add', '.']);
+      git(rootDir, ['commit', '-q', '-m', 'add a trailing-period fragment to remove']);
+
+      fs.rmSync(path.join(rootDir, 'docs', 'patch-notes', 'unreleased', 'ops-retired.md'));
+
+      const result = checkReleaseHygiene(config, { baseRef: 'HEAD' });
+
+      expect(result.patchNoteFiles).toEqual(['docs/patch-notes/unreleased/ops-retired.md']);
+      expect(result.trailingPeriodSummaryPatchNoteFiles).toEqual([]);
+      expect(result.ok).toBe(true);
+    } finally {
+      fs.rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// PTRY-524: `isReleaseRelevantFile` matches on broad prefixes
+// (`relevantPrefixes`/`relevantScriptPrefixes`), and test files live under
+// those same prefixes (`src/**/__tests__/**`, `*.test.ts`, `*.spec.tsx`), so
+// a change that adds ONLY tests was classified release-relevant and blocked
+// at push time for a change no user can observe. `excludePatterns` (default:
+// test-file shapes) exempts a genuinely test-only change without weakening
+// the gate for a change that also touches real source under the same prefix.
+describe('release-hygiene test-only exclude patterns', () => {
+  test('a test-only change under a relevant prefix does not require a patch note', () => {
+    const config = makeRougeConfig('/unused');
+    const result = classifyReleaseHygiene(config, [
+      'src/combat/__tests__/combat-engine.test.ts',
+      'src/ui/town-view.spec.tsx',
+      'src/ui/__mocks__/town-view.ts',
+    ]);
+    expect(result.ok).toBe(true);
+    expect(result.requiresPatchNote).toBe(false);
+    expect(result.relevantFiles).toEqual([]);
+  });
+
+  test('a change touching real source AND tests under the same prefix still requires a patch note', () => {
+    const config = makeRougeConfig('/unused');
+    const result = classifyReleaseHygiene(config, [
+      'src/combat/combat-engine.ts',
+      'src/combat/__tests__/combat-engine.test.ts',
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.requiresPatchNote).toBe(true);
+    expect(result.relevantFiles).toEqual(['src/combat/combat-engine.ts']);
+  });
+
+  test('an excluded test path does not satisfy patch-note coverage on its own (fails, not silently exempted)', () => {
+    const config = makeRougeConfig('/unused');
+    const result = classifyReleaseHygiene(config, [
+      'src/combat/combat-engine.ts',
+      'src/combat/__tests__/combat-engine.test.ts',
+      'docs/patch-notes/unreleased/gameplay-combat-pacing.md',
+    ]);
+    expect(result.ok).toBe(true);
+    expect(result.relevantFiles).toEqual(['src/combat/combat-engine.ts']);
+  });
+
+  test('exact relevantFiles/relevantDocFiles entries are never excluded, even if they look like a test file', () => {
+    const config = {
+      ...makeRougeConfig('/unused'),
+      hygiene: {
+        ...makeRougeConfig('/unused').hygiene,
+        relevantFiles: ['scripts/build.test.js'],
+      },
+    };
+    const result = classifyReleaseHygiene(config, ['scripts/build.test.js']);
+    expect(result.ok).toBe(false);
+    expect(result.relevantFiles).toEqual(['scripts/build.test.js']);
+  });
+
+  test('a repo can override excludePatterns to disable the default test exemption', () => {
+    const config = {
+      ...makeRougeConfig('/unused'),
+      hygiene: {
+        ...makeRougeConfig('/unused').hygiene,
+        excludePatterns: [],
+      },
+    };
+    const result = classifyReleaseHygiene(config, ['src/combat/__tests__/combat-engine.test.ts']);
+    expect(result.ok).toBe(false);
+    expect(result.relevantFiles).toEqual(['src/combat/__tests__/combat-engine.test.ts']);
+  });
+});
