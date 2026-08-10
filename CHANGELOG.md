@@ -17,6 +17,29 @@ CHANGELOG entry.
 
 ---
 
+## 0.5.0
+
+- hygiene no longer requires a patch note for a test-only change
+  `isReleaseRelevantFile` matched on broad path prefixes (e.g. `src/`), and
+  test files live under those same prefixes, so a change that added only test
+  coverage was classified release-relevant and blocked at push time for a
+  change no user can observe. `hygiene.excludePatterns` (default: common test
+  file shapes — `__tests__/`, `__mocks__/`, `*.test.*`, `*.spec.*`) now exempts
+  a genuinely test-only change; it applies only to prefix-based matches, never
+  to a repo's curated exact `relevantFiles`/`relevantDocFiles` lists, and a
+  change that also touches real source under the same prefix still requires a
+  note. Configurable per repo, defaults to the common test-file shapes.
+- hygiene rejects a trailing-period summary on changed fragments
+  `release-kit hygiene` validated a changed fragment's body for the scaffold
+  placeholder but never its summary, so a summary ending in `.` sailed through
+  every push and only failed later, at `check`/`publish` time — the renderer
+  emits `**{summary}:**`, so a trailing period renders `**Summary.:**`. hygiene
+  now applies the same rule `parseFragment` already enforced, through one
+  shared `validateFragmentContent` helper, scoped to only the fragments the
+  current change adds or modifies. `HygieneResult` gains a
+  `trailingPeriodSummaryPatchNoteFiles` field and the CLI prints the offending
+  file(s) by name.
+
 ## 0.4.1
 
 - hygiene rejects a placeholder body on changed fragments
