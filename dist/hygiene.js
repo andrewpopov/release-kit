@@ -9,8 +9,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.DEFAULT_HYGIENE_EXCLUDE_PATTERNS = void 0;
 exports.collectChangedFiles = collectChangedFiles;
 exports.isPatchNoteArtifact = isPatchNoteArtifact;
+exports.matchesHygieneExcludePattern = matchesHygieneExcludePattern;
 exports.isReleaseRelevantFile = isReleaseRelevantFile;
 exports.classifyReleaseHygiene = classifyReleaseHygiene;
 exports.checkReleaseHygiene = checkReleaseHygiene;
@@ -81,34 +83,95 @@ function isPatchNoteArtifact(config, filePath) {
         // patch-note artifact. Without this, no release branch can ever pass.
         normalized.startsWith(`${(0, config_1.archiveDirPosix)(config)}/`));
 }
+/**
+ * Default `hygiene.excludePatterns` — test files. Every consuming repo's
+ * `relevantPrefixes` (e.g. `packages/web-app/src/`) sweeps in test files
+ * living under the same tree (`src/**\/__tests__/**`, `*.test.ts`,
+ * `*.spec.tsx`), so a change that adds ONLY tests was classified
+ * release-relevant and blocked at push time for a change no user can
+ * observe (PTRY-524).
+ */
+exports.DEFAULT_HYGIENE_EXCLUDE_PATTERNS = ['**/__tests__/**', '**/__mocks__/**', '*.test.*', '*.spec.*'];
+function escapeRegExp(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+/**
+ * Converts a small glob subset (`**` = any number of path segments including
+ * zero, `*` = any characters within one segment) to a RegExp. Handles a
+ * leading `**` + `/` and a trailing `/` + `**` specially so a pattern like
+ * `**` + `/__tests__/` + `**` also matches `__tests__/foo.ts` at the root
+ * (zero leading/trailing segments) — a plain `**` -> `.*` substitution would
+ * require a literal `/` on both sides and miss that case.
+ */
+function globToRegExp(glob) {
+    let body = glob;
+    let optionalPrefix = false;
+    let optionalSuffix = false;
+    if (body.startsWith('**/')) {
+        optionalPrefix = true;
+        body = body.slice(3);
+    }
+    if (body.endsWith('/**')) {
+        optionalSuffix = true;
+        body = body.slice(0, -3);
+    }
+    const DOUBLE_STAR = ' DOUBLE_STAR ';
+    const SINGLE_STAR = ' SINGLE_STAR ';
+    const tokenized = body.split('**').join(DOUBLE_STAR).split('*').join(SINGLE_STAR);
+    const escaped = escapeRegExp(tokenized).split(DOUBLE_STAR).join('.*').split(SINGLE_STAR).join('[^/]*');
+    const prefix = optionalPrefix ? '(?:.*/)?' : '';
+    const suffix = optionalSuffix ? '(?:/.*)?' : '';
+    return new RegExp(`^${prefix}${escaped}${suffix}$`);
+}
+/**
+ * Whether `normalizedPath` matches a single `excludePatterns` glob. A
+ * pattern containing `/` is matched against the full normalized path (it
+ * names a directory shape, e.g. `**\/__tests__/**`); a pattern with no `/` is
+ * matched against the basename only (it names a filename shape, e.g.
+ * `*.test.*`), the same convention `.gitignore` uses — otherwise a bare
+ * `*.test.*` could only ever match a file living at the repo root.
+ */
+function matchesHygieneExcludePattern(pattern, normalizedPath) {
+    const target = pattern.includes('/') ? normalizedPath : node_path_1.default.posix.basename(normalizedPath);
+    return globToRegExp(pattern).test(target);
+}
+function isExcludedFromRelevance(config, normalizedPath) {
+    const patterns = config.hygiene.excludePatterns ?? exports.DEFAULT_HYGIENE_EXCLUDE_PATTERNS;
+    return patterns.some((pattern) => matchesHygieneExcludePattern(pattern, normalizedPath));
+}
 function isReleaseRelevantFile(config, filePath) {
     const normalized = normalizePath(filePath);
     if (!normalized || isPatchNoteArtifact(config, normalized)) {
         return false;
     }
     const { relevantFiles, relevantDocFiles, relevantPrefixes, relevantScriptPrefixes } = config.hygiene;
+    // Exact, curated file lists are a deliberate opt-in by the repo owner — a
+    // default exclude pattern must never override that, so exclusion is
+    // checked only for the broad prefix matches below (see the `excludePatterns`
+    // doc comment on `HygieneConfig` for the full reasoning).
     if (relevantFiles.includes(normalized) || relevantDocFiles.includes(normalized)) {
         return true;
     }
-    if (relevantPrefixes.some((prefix) => normalized.startsWith(prefix))) {
-        return true;
-    }
-    return relevantScriptPrefixes.some((prefix) => normalized.startsWith(prefix));
+    const matchesPrefix = relevantPrefixes.some((prefix) => normalized.startsWith(prefix)) ||
+        relevantScriptPrefixes.some((prefix) => normalized.startsWith(prefix));
+    return matchesPrefix && !isExcludedFromRelevance(config, normalized);
 }
 /**
- * Reads a changed patch-note fragment's body off disk, or `undefined` if it
- * can't be read — deleted by this change, or not a well-formed fragment.
- * Either way there is nothing to validate, so callers should skip it rather
- * than fail hygiene on it (full front-matter validation is `check`/
- * `publish`'s job, not hygiene's).
+ * Reads a changed patch-note fragment's summary/body off disk, or
+ * `undefined` if it can't be read — deleted by this change, or not a
+ * well-formed fragment. Either way there is nothing to validate, so callers
+ * should skip it rather than fail hygiene on it (full front-matter
+ * validation, e.g. kind/presence checks, is `check`/`publish`'s job, not
+ * hygiene's).
  */
-function readChangedFragmentBody(rootDir, relativeFilePath) {
+function readChangedFragmentContent(rootDir, relativeFilePath) {
     const absolutePath = node_path_1.default.resolve(rootDir, relativeFilePath);
     if (!node_fs_1.default.existsSync(absolutePath)) {
         return undefined;
     }
     try {
-        return (0, fragments_1.parseFrontMatter)(node_fs_1.default.readFileSync(absolutePath, 'utf8'), relativeFilePath).body;
+        const { meta, body } = (0, fragments_1.parseFrontMatter)(node_fs_1.default.readFileSync(absolutePath, 'utf8'), relativeFilePath);
+        return { summary: (0, fragments_1.extractSummary)(meta), body };
     }
     catch {
         return undefined;
@@ -121,18 +184,27 @@ function classifyReleaseHygiene(config, changedFiles) {
     const requiresPatchNote = relevantFiles.length > 0;
     const hasPatchNoteUpdate = patchNoteFiles.length > 0;
     const rootDir = node_path_1.default.resolve(config.rootDir);
-    const placeholderPatchNoteFiles = patchNoteFiles.filter((file) => {
-        const body = readChangedFragmentBody(rootDir, file);
-        return body !== undefined && (0, fragments_1.isPlaceholderBody)(config, body);
+    const changedFragmentIssues = patchNoteFiles.map((file) => {
+        const content = readChangedFragmentContent(rootDir, file);
+        return { file, issues: content ? (0, fragments_1.validateFragmentContent)(config, content) : [] };
     });
+    const placeholderPatchNoteFiles = changedFragmentIssues
+        .filter(({ issues }) => issues.some((issue) => issue.code === 'placeholder-body'))
+        .map(({ file }) => file);
+    const trailingPeriodSummaryPatchNoteFiles = changedFragmentIssues
+        .filter(({ issues }) => issues.some((issue) => issue.code === 'trailing-period-summary'))
+        .map(({ file }) => file);
     return {
-        ok: (!requiresPatchNote || hasPatchNoteUpdate) && placeholderPatchNoteFiles.length === 0,
+        ok: (!requiresPatchNote || hasPatchNoteUpdate) &&
+            placeholderPatchNoteFiles.length === 0 &&
+            trailingPeriodSummaryPatchNoteFiles.length === 0,
         changedFiles: normalizedChangedFiles,
         hasPatchNoteUpdate,
         patchNoteFiles,
         relevantFiles,
         requiresPatchNote,
         placeholderPatchNoteFiles,
+        trailingPeriodSummaryPatchNoteFiles,
     };
 }
 function checkReleaseHygiene(config, options = {}) {

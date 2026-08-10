@@ -93,11 +93,57 @@ export function isPlaceholderBody(config: ReleaseKitConfig, body: string | undef
   return normalize(body) === placeholder;
 }
 
+/**
+ * Extracts a fragment's summary from parsed front matter (`summary`, falling
+ * back to `title`). One definition shared by `parseFragment` and `hygiene`'s
+ * changed-fragment validation so the two can never derive a different
+ * summary for the same file.
+ */
+export function extractSummary(meta: Record<string, string>): string {
+  return String(meta.summary || meta.title || '').trim();
+}
+
+export interface FragmentContentIssue {
+  code: 'placeholder-body' | 'trailing-period-summary';
+  /** Message text WITHOUT the file-path prefix — callers prepend their own. */
+  message: string;
+}
+
+/**
+ * Content-quality checks that apply once a fragment has a non-empty summary
+ * and body (presence is checked separately by `parseFragment`, since a
+ * missing summary/body is a different failure mode with its own message).
+ * Single definition shared by `parseFragment` (used by `check`/`publish`) and
+ * `hygiene`'s ratchet check, so the two paths cannot drift apart on what
+ * counts as an unwritten placeholder or an unrenderable summary — the exact
+ * gap PTRY-509 closed for the placeholder rule and PTRY-526 closes for the
+ * summary rule.
+ */
+export function validateFragmentContent(
+  config: ReleaseKitConfig,
+  content: { summary: string; body: string },
+): FragmentContentIssue[] {
+  const issues: FragmentContentIssue[] = [];
+  if (isPlaceholderBody(config, content.body)) {
+    issues.push({
+      code: 'placeholder-body',
+      message: 'body is still the scaffold placeholder — write the real impact paragraph.',
+    });
+  }
+  if (content.summary.endsWith('.')) {
+    issues.push({
+      code: 'trailing-period-summary',
+      message: "summary must not end with '.' — the renderer emits '**{summary}:**'.",
+    });
+  }
+  return issues;
+}
+
 export function parseFragment(filePath: string, rootDir: string, config: ReleaseKitConfig): Fragment {
   const relativePath = path.relative(rootDir, filePath);
   const { meta, body } = parseFrontMatter(fs.readFileSync(filePath, 'utf8'), relativePath);
   const kind = String(meta.kind || '').trim();
-  const summary = String(meta.summary || meta.title || '').trim();
+  const summary = extractSummary(meta);
   const validKindIds = kindIds(config.kinds);
   if (!validKindIds.has(kind)) {
     throw new Error(`${relativePath} has kind "${kind}". Expected one of: ${[...validKindIds].join(', ')}.`);
@@ -108,13 +154,9 @@ export function parseFragment(filePath: string, rootDir: string, config: Release
   if (!body) {
     throw new Error(`${relativePath} needs a short body paragraph.`);
   }
-  if (isPlaceholderBody(config, body)) {
-    throw new Error(
-      `${relativePath} body is still the scaffold placeholder — write the real impact paragraph.`,
-    );
-  }
-  if (summary.endsWith('.')) {
-    throw new Error(`${relativePath} summary must not end with '.' — the renderer emits '**{summary}:**'.`);
+  const [firstIssue] = validateFragmentContent(config, { summary, body });
+  if (firstIssue) {
+    throw new Error(`${relativePath} ${firstIssue.message}`);
   }
   return { filePath, fileName: path.basename(filePath), kind, summary, body };
 }
