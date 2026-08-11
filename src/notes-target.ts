@@ -14,6 +14,8 @@ import { releaseLinkPath, resolvePaths } from './config';
 import type { Fragment } from './fragments';
 import { parseReleaseSummary, renderReleaseNote } from './render';
 import { listReleaseSummaries, tryStep, updatePatchNotesIndex } from './publish';
+import { combineRestores, snapshotFile } from './fs-snapshot';
+import type { Restore } from './fs-snapshot';
 
 export interface ReleaseNotesPublishContext {
   version: string;
@@ -33,6 +35,18 @@ export interface ReleaseNotesTarget {
   validate(config: ReleaseKitConfig, version: string): string[];
   /** Returns whether `version`'s notes already exist in the target (checked pre-mutation by `preflightCut`). */
   hasVersion(config: ReleaseKitConfig, version: string): boolean;
+  /**
+   * Optional rollback support, mirroring `VersionManifestAdapter.snapshot`.
+   * Snapshots every file `publish(config, ctx, ...)` would touch for this
+   * `ctx` (the output file/index AND the fragment files `ctx.fragments`
+   * names, which `publish` moves from `unreleased/` into `archive/<version>/`)
+   * and returns a function that restores them all byte-for-byte, including
+   * putting moved fragments back at their original location. `cutRelease`
+   * calls this BEFORE `publish` and invokes the returned function if a later
+   * step fails. Both built-in targets implement it; a custom target that
+   * doesn't is skipped by `cutRelease` — best effort, not required.
+   */
+  snapshot?(config: ReleaseKitConfig, ctx: ReleaseNotesPublishContext): () => void;
 }
 
 /** Archives consumed fragments to `archiveDir/<version>/` and deletes them from `unreleased/`. Shared by both targets. */
@@ -47,6 +61,40 @@ function archiveConsumedFragments(config: ReleaseKitConfig, version: string, fra
     fs.copyFileSync(fragment.filePath, path.join(archiveVersionDir, fragment.fileName));
     fs.rmSync(fragment.filePath);
   }
+}
+
+/**
+ * Snapshots what `archiveConsumedFragments` is about to do for `fragments`:
+ * each fragment's ORIGINAL location under `unreleased/` (so a rollback moves
+ * it back, not just re-creates a copy) and its future archive-copy
+ * destination (so a rollback removes a partially-written copy rather than
+ * leaving it behind). Also removes the `archiveDir/<version>/` directory on
+ * rollback if this snapshot is the one that would have created it and it
+ * ends up empty — an empty leftover directory isn't a content change (git
+ * doesn't track empty dirs), so a failure tidying it up never masks the
+ * file-level restore above it.
+ */
+function snapshotArchivedFragments(archiveVersionDir: string, fragments: Fragment[]): Restore {
+  if (fragments.length === 0) {
+    return () => {};
+  }
+  const archiveDirExisted = fs.existsSync(archiveVersionDir);
+  const restoreFiles = combineRestores([
+    ...fragments.map((fragment) => snapshotFile(fragment.filePath)),
+    ...fragments.map((fragment) => snapshotFile(path.join(archiveVersionDir, fragment.fileName))),
+  ]);
+  return () => {
+    restoreFiles();
+    if (!archiveDirExisted) {
+      try {
+        if (fs.existsSync(archiveVersionDir) && fs.readdirSync(archiveVersionDir).length === 0) {
+          fs.rmdirSync(archiveVersionDir);
+        }
+      } catch {
+        // Best-effort tidy-up only — see doc comment above.
+      }
+    }
+  };
 }
 
 function validateReleaseFile(
@@ -103,6 +151,17 @@ export function patchNotesDirTarget(): ReleaseNotesTarget {
     hasVersion(config, version) {
       const { releasesDir } = resolvePaths(config);
       return fs.existsSync(path.join(releasesDir, config.versionStrategy.releaseFileName(version)));
+    },
+
+    snapshot(config, ctx) {
+      const paths = resolvePaths(config);
+      const releasePath = path.join(paths.releasesDir, config.versionStrategy.releaseFileName(ctx.version));
+      const archiveVersionDir = path.join(paths.archiveDir, ctx.version);
+      return combineRestores([
+        snapshotFile(releasePath),
+        snapshotFile(paths.indexPath),
+        snapshotArchivedFragments(archiveVersionDir, ctx.fragments),
+      ]);
     },
 
     validate(config, version) {
@@ -293,6 +352,13 @@ export function changelogTarget(options: ChangelogTargetOptions = {}): ReleaseNo
       }
       const source = fs.readFileSync(changelogPath, 'utf8');
       return versionHeadingRegex(version).test(source);
+    },
+
+    snapshot(config, ctx) {
+      const rootDir = path.resolve(config.rootDir);
+      const changelogPath = path.join(rootDir, changelogRelPath);
+      const archiveVersionDir = path.join(resolvePaths(config).archiveDir, ctx.version);
+      return combineRestores([snapshotFile(changelogPath), snapshotArchivedFragments(archiveVersionDir, ctx.fragments)]);
     },
 
     validate(config, version) {

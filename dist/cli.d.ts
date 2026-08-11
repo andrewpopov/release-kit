@@ -17,6 +17,7 @@ interface ParsedArgs {
     tarball: string;
     force: boolean;
     allowEmpty: boolean;
+    allowMissingHistory: boolean;
     help: boolean;
     json: boolean;
 }

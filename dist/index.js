@@ -3,7 +3,7 @@
 // the named exports for ESM consumers of the CommonJS build.
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.isReleaseRelevantFile = exports.isPatchNoteArtifact = exports.checkReleaseHygiene = exports.collectChangedFiles = exports.classifyReleaseHygiene = exports.createReleaseArtifactV1 = exports.cutRelease = exports.validateReleaseState = exports.publishRelease = exports.updatePatchNotesIndex = exports.listReleaseSummaries = exports.bumpVersion = exports.getGitShortSha = exports.nextVersion = exports.resolveVersion = exports.createAnthropicReleaseSummaryGenerator = exports.announceReleaseToDiscord = exports.postReleaseToDiscord = exports.buildDiscordReleasePayload = exports.generateAiReleaseSummary = exports.buildAiReleaseSummaryPrompt = exports.summarizeReleaseWork = exports.changelogTarget = exports.patchNotesDirTarget = exports.renderPatchNotesIndex = exports.parseReleaseSummary = exports.renderReleaseNote = exports.writeNewFragment = exports.normalizeFragmentBody = exports.collectFragments = exports.parseFragment = exports.isFragmentFile = exports.todayIso = exports.slugify = exports.parseFrontMatter = exports.npmPackage = exports.DEFAULT_KIND_BUMP = exports.resolveBumpLevel = exports.STABLE_VERSION_RE = exports.ALPHA_VERSION_RE = exports.stableSemver = exports.alphaSemver = exports.applyTemplate = exports.titleRegExp = exports.renderTitle = exports.releaseLinkPath = exports.archiveDirPosix = exports.notesDirPosix = exports.resolvePaths = exports.defineConfig = void 0;
-exports.formatPackedBinFailures = exports.verifyPackedBins = exports.parseCliArgs = exports.runCli = void 0;
+exports.formatPackedBinFailures = exports.verifyPackedBins = exports.parseCliArgs = exports.runCli = exports.HygieneGitError = void 0;
 var config_1 = require("./config");
 Object.defineProperty(exports, "defineConfig", { enumerable: true, get: function () { return config_1.defineConfig; } });
 Object.defineProperty(exports, "resolvePaths", { enumerable: true, get: function () { return config_1.resolvePaths; } });
@@ -65,6 +65,7 @@ Object.defineProperty(exports, "collectChangedFiles", { enumerable: true, get: f
 Object.defineProperty(exports, "checkReleaseHygiene", { enumerable: true, get: function () { return hygiene_1.checkReleaseHygiene; } });
 Object.defineProperty(exports, "isPatchNoteArtifact", { enumerable: true, get: function () { return hygiene_1.isPatchNoteArtifact; } });
 Object.defineProperty(exports, "isReleaseRelevantFile", { enumerable: true, get: function () { return hygiene_1.isReleaseRelevantFile; } });
+Object.defineProperty(exports, "HygieneGitError", { enumerable: true, get: function () { return hygiene_1.HygieneGitError; } });
 var cli_1 = require("./cli");
 Object.defineProperty(exports, "runCli", { enumerable: true, get: function () { return cli_1.run; } });
 Object.defineProperty(exports, "parseCliArgs", { enumerable: true, get: function () { return cli_1.parseArgs; } });

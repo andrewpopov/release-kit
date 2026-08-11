@@ -1,0 +1,6 @@
+---
+kind: fixed
+summary: a failed release cut now rolls back cleanly instead of leaving the working tree half-mutated
+---
+
+`cutRelease` bumped the manifest, published the release note, and archived consumed fragments before validating the result — so a validation failure (or a malformed lockfile discovered mid-write) left package.json/package-lock.json bumped, the notes target partially written, and fragments possibly moved into `archive/<version>/`, with no way back short of a manual git reset mid-release. `cutRelease` now snapshots every file a cut can touch (the manifest, via a new optional `VersionManifestAdapter.snapshot`, and the notes target's output plus its archived fragments, via a new optional `ReleaseNotesTarget.snapshot`) before the first write, and restores all of them byte-for-byte — including moving archived fragments back to `unreleased/` — if bump, publish, archive, or the final validation fails. `npmPackage()`'s manifest adapter also now validates a present lockfile's shape before writing `package.json`, so a malformed lockfile is caught before either file is touched. A rollback failure is appended to, and never masks, the original error. Both built-in adapters/targets implement the new `snapshot` hook; a custom one that doesn't is simply skipped, so the rest of a cut still rolls back.

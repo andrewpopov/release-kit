@@ -6,12 +6,24 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { combineRestores, snapshotFile } from './fs-snapshot';
 
 export interface VersionManifestAdapter {
   readVersion(rootDir: string): string;
   writeVersion(rootDir: string, version: string): void;
   /** Optional extra validation; returns a list of human-readable error strings. */
   validateVersionSync?(rootDir: string, version: string): string[];
+  /**
+   * Optional rollback support. Snapshots whatever `writeVersion` is about to
+   * touch and returns a function that restores it byte-for-byte. `cutRelease`
+   * calls this BEFORE `writeVersion` and invokes the returned function if a
+   * later step (publish, archive, validation) fails, so that failure doesn't
+   * leave the manifest bumped. Adapters that don't implement this are simply
+   * skipped by `cutRelease` — best effort, not required — so a custom
+   * third-party adapter without `snapshot` degrades gracefully: the rest of
+   * the cut still rolls back, just not the manifest.
+   */
+  snapshot?(rootDir: string): () => void;
 }
 
 interface JsonRecord {
@@ -61,21 +73,35 @@ export function npmPackage(options: NpmPackageOptions = {}): VersionManifestAdap
   function writeVersion(rootDir: string, version: string): void {
     const pkgPath = packagePath(rootDir);
     const pkg = readJsonFile(pkgPath);
+
+    // Read AND shape-validate the lockfile BEFORE writing anything: a
+    // malformed lockfile must fail before package.json is touched, not
+    // after (PKG-140 finding 2) — otherwise a half-bumped manifest is left
+    // behind for every consumer whose lockfile happens to be malformed.
+    const lockFilePath = lockPath(rootDir);
+    const lockFileExists = fs.existsSync(lockFilePath);
+    let lock: JsonRecord | undefined;
+    if (lockFileExists) {
+      lock = readJsonFile(lockFilePath);
+      const packages = lock.packages;
+      if (!packages || typeof packages !== 'object' || Array.isArray(packages) || !(packages as JsonRecord)[''])  {
+        throw new Error(`${lockFileName} is missing packages[""].version.`);
+      }
+    }
+
     pkg.version = version;
     writeJsonFile(pkgPath, pkg);
 
-    const lockFilePath = lockPath(rootDir);
-    if (!fs.existsSync(lockFilePath)) {
-      return;
+    if (lockFileExists && lock) {
+      lock.version = version;
+      ((lock.packages as JsonRecord)[''] as JsonRecord).version = version;
+      writeJsonFile(lockFilePath, lock);
     }
-    const lock = readJsonFile(lockFilePath);
-    lock.version = version;
-    const packages = lock.packages;
-    if (!packages || typeof packages !== 'object' || Array.isArray(packages) || !(packages as JsonRecord)[''])  {
-      throw new Error(`${lockFileName} is missing packages[""].version.`);
-    }
-    ((packages as JsonRecord)[''] as JsonRecord).version = version;
-    writeJsonFile(lockFilePath, lock);
+  }
+
+  /** See `VersionManifestAdapter.snapshot`'s doc comment. */
+  function snapshot(rootDir: string): () => void {
+    return combineRestores([snapshotFile(packagePath(rootDir)), snapshotFile(lockPath(rootDir))]);
   }
 
   function validateVersionSync(rootDir: string, version: string): string[] {
@@ -103,5 +129,5 @@ export function npmPackage(options: NpmPackageOptions = {}): VersionManifestAdap
     return errors;
   }
 
-  return { readVersion, writeVersion, validateVersionSync };
+  return { readVersion, writeVersion, validateVersionSync, snapshot };
 }

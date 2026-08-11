@@ -88,8 +88,9 @@ export {
   checkReleaseHygiene,
   isPatchNoteArtifact,
   isReleaseRelevantFile,
+  HygieneGitError,
 } from './hygiene';
-export type { HygieneResult, CheckReleaseHygieneOptions } from './hygiene';
+export type { HygieneResult, CheckReleaseHygieneOptions, HygieneGitFailureKind } from './hygiene';
 
 export { run as runCli, parseArgs as parseCliArgs } from './cli';
 export type { CliRunOptions } from './cli';

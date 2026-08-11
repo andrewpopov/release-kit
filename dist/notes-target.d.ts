@@ -25,6 +25,18 @@ export interface ReleaseNotesTarget {
     validate(config: ReleaseKitConfig, version: string): string[];
     /** Returns whether `version`'s notes already exist in the target (checked pre-mutation by `preflightCut`). */
     hasVersion(config: ReleaseKitConfig, version: string): boolean;
+    /**
+     * Optional rollback support, mirroring `VersionManifestAdapter.snapshot`.
+     * Snapshots every file `publish(config, ctx, ...)` would touch for this
+     * `ctx` (the output file/index AND the fragment files `ctx.fragments`
+     * names, which `publish` moves from `unreleased/` into `archive/<version>/`)
+     * and returns a function that restores them all byte-for-byte, including
+     * putting moved fragments back at their original location. `cutRelease`
+     * calls this BEFORE `publish` and invokes the returned function if a later
+     * step fails. Both built-in targets implement it; a custom target that
+     * doesn't is skipped by `cutRelease` — best effort, not required.
+     */
+    snapshot?(config: ReleaseKitConfig, ctx: ReleaseNotesPublishContext): () => void;
 }
 /**
  * DEFAULT target: rouge's current behavior — a `releases/<version>.md` file

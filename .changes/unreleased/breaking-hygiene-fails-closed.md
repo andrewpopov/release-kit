@@ -1,0 +1,6 @@
+---
+kind: breaking
+summary: hygiene now fails closed instead of silently passing when git or the base ref is unavailable
+---
+
+`release-kit hygiene` used to swallow every git failure and treat it as "no changed files," so an invalid or unreachable `baseRef` — including the shallow checkout that most CI providers use by default — made the gate report success having checked nothing. It now throws a `HygieneGitError` (exported, with a `kind`: `git-unavailable`, `not-a-git-repo`, `base-ref-not-found`, or `insufficient-history`) whenever it can't reliably compute the changed-file set, and the CLI exits non-zero instead of printing "ok". **This will newly fail any `release:hygiene` run whose CI checkout can't resolve `hygiene.baseRef`** — most commonly a shallow clone that never fetched the base branch. Fix it by fetching full history (`actions/checkout` with `fetch-depth: 0`, or `git fetch --unshallow`/fetch the base ref explicitly); each thrown error names the fix for its specific failure. If your CI genuinely cannot supply more history, set `hygiene.allowMissingHistory: true` in `release-kit.config.js` (or pass `--allow-missing-history`) to explicitly downgrade to a working-tree-only check with a loud warning instead of failing — this is opt-in only, never the default.

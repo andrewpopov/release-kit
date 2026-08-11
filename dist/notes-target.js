@@ -18,6 +18,7 @@ const node_path_1 = __importDefault(require("node:path"));
 const config_1 = require("./config");
 const render_1 = require("./render");
 const publish_1 = require("./publish");
+const fs_snapshot_1 = require("./fs-snapshot");
 /** Archives consumed fragments to `archiveDir/<version>/` and deletes them from `unreleased/`. Shared by both targets. */
 function archiveConsumedFragments(config, version, fragments) {
     if (fragments.length === 0) {
@@ -30,6 +31,40 @@ function archiveConsumedFragments(config, version, fragments) {
         node_fs_1.default.copyFileSync(fragment.filePath, node_path_1.default.join(archiveVersionDir, fragment.fileName));
         node_fs_1.default.rmSync(fragment.filePath);
     }
+}
+/**
+ * Snapshots what `archiveConsumedFragments` is about to do for `fragments`:
+ * each fragment's ORIGINAL location under `unreleased/` (so a rollback moves
+ * it back, not just re-creates a copy) and its future archive-copy
+ * destination (so a rollback removes a partially-written copy rather than
+ * leaving it behind). Also removes the `archiveDir/<version>/` directory on
+ * rollback if this snapshot is the one that would have created it and it
+ * ends up empty — an empty leftover directory isn't a content change (git
+ * doesn't track empty dirs), so a failure tidying it up never masks the
+ * file-level restore above it.
+ */
+function snapshotArchivedFragments(archiveVersionDir, fragments) {
+    if (fragments.length === 0) {
+        return () => { };
+    }
+    const archiveDirExisted = node_fs_1.default.existsSync(archiveVersionDir);
+    const restoreFiles = (0, fs_snapshot_1.combineRestores)([
+        ...fragments.map((fragment) => (0, fs_snapshot_1.snapshotFile)(fragment.filePath)),
+        ...fragments.map((fragment) => (0, fs_snapshot_1.snapshotFile)(node_path_1.default.join(archiveVersionDir, fragment.fileName))),
+    ]);
+    return () => {
+        restoreFiles();
+        if (!archiveDirExisted) {
+            try {
+                if (node_fs_1.default.existsSync(archiveVersionDir) && node_fs_1.default.readdirSync(archiveVersionDir).length === 0) {
+                    node_fs_1.default.rmdirSync(archiveVersionDir);
+                }
+            }
+            catch {
+                // Best-effort tidy-up only — see doc comment above.
+            }
+        }
+    };
 }
 function validateReleaseFile(config, errors, rootDir, releasePath, expectedVersion) {
     const release = (0, publish_1.tryStep)(errors, () => (0, render_1.parseReleaseSummary)(config, releasePath), null);
@@ -73,6 +108,16 @@ function patchNotesDirTarget() {
         hasVersion(config, version) {
             const { releasesDir } = (0, config_1.resolvePaths)(config);
             return node_fs_1.default.existsSync(node_path_1.default.join(releasesDir, config.versionStrategy.releaseFileName(version)));
+        },
+        snapshot(config, ctx) {
+            const paths = (0, config_1.resolvePaths)(config);
+            const releasePath = node_path_1.default.join(paths.releasesDir, config.versionStrategy.releaseFileName(ctx.version));
+            const archiveVersionDir = node_path_1.default.join(paths.archiveDir, ctx.version);
+            return (0, fs_snapshot_1.combineRestores)([
+                (0, fs_snapshot_1.snapshotFile)(releasePath),
+                (0, fs_snapshot_1.snapshotFile)(paths.indexPath),
+                snapshotArchivedFragments(archiveVersionDir, ctx.fragments),
+            ]);
         },
         validate(config, version) {
             const errors = [];
@@ -241,6 +286,12 @@ function changelogTarget(options = {}) {
             }
             const source = node_fs_1.default.readFileSync(changelogPath, 'utf8');
             return versionHeadingRegex(version).test(source);
+        },
+        snapshot(config, ctx) {
+            const rootDir = node_path_1.default.resolve(config.rootDir);
+            const changelogPath = node_path_1.default.join(rootDir, changelogRelPath);
+            const archiveVersionDir = node_path_1.default.join((0, config_1.resolvePaths)(config).archiveDir, ctx.version);
+            return (0, fs_snapshot_1.combineRestores)([(0, fs_snapshot_1.snapshotFile)(changelogPath), snapshotArchivedFragments(archiveVersionDir, ctx.fragments)]);
         },
         validate(config, version) {
             const rootDir = node_path_1.default.resolve(config.rootDir);

@@ -11,6 +11,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.npmPackage = npmPackage;
 const node_fs_1 = __importDefault(require("node:fs"));
 const node_path_1 = __importDefault(require("node:path"));
+const fs_snapshot_1 = require("./fs-snapshot");
 function readJsonFile(filePath) {
     return JSON.parse(node_fs_1.default.readFileSync(filePath, 'utf8'));
 }
@@ -38,20 +39,31 @@ function npmPackage(options = {}) {
     function writeVersion(rootDir, version) {
         const pkgPath = packagePath(rootDir);
         const pkg = readJsonFile(pkgPath);
+        // Read AND shape-validate the lockfile BEFORE writing anything: a
+        // malformed lockfile must fail before package.json is touched, not
+        // after (PKG-140 finding 2) — otherwise a half-bumped manifest is left
+        // behind for every consumer whose lockfile happens to be malformed.
+        const lockFilePath = lockPath(rootDir);
+        const lockFileExists = node_fs_1.default.existsSync(lockFilePath);
+        let lock;
+        if (lockFileExists) {
+            lock = readJsonFile(lockFilePath);
+            const packages = lock.packages;
+            if (!packages || typeof packages !== 'object' || Array.isArray(packages) || !packages['']) {
+                throw new Error(`${lockFileName} is missing packages[""].version.`);
+            }
+        }
         pkg.version = version;
         writeJsonFile(pkgPath, pkg);
-        const lockFilePath = lockPath(rootDir);
-        if (!node_fs_1.default.existsSync(lockFilePath)) {
-            return;
+        if (lockFileExists && lock) {
+            lock.version = version;
+            lock.packages[''].version = version;
+            writeJsonFile(lockFilePath, lock);
         }
-        const lock = readJsonFile(lockFilePath);
-        lock.version = version;
-        const packages = lock.packages;
-        if (!packages || typeof packages !== 'object' || Array.isArray(packages) || !packages['']) {
-            throw new Error(`${lockFileName} is missing packages[""].version.`);
-        }
-        packages[''].version = version;
-        writeJsonFile(lockFilePath, lock);
+    }
+    /** See `VersionManifestAdapter.snapshot`'s doc comment. */
+    function snapshot(rootDir) {
+        return (0, fs_snapshot_1.combineRestores)([(0, fs_snapshot_1.snapshotFile)(packagePath(rootDir)), (0, fs_snapshot_1.snapshotFile)(lockPath(rootDir))]);
     }
     function validateVersionSync(rootDir, version) {
         const errors = [];
@@ -78,5 +90,5 @@ function npmPackage(options = {}) {
         }
         return errors;
     }
-    return { readVersion, writeVersion, validateVersionSync };
+    return { readVersion, writeVersion, validateVersionSync, snapshot };
 }

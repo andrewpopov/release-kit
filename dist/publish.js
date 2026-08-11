@@ -1,10 +1,13 @@
 "use strict";
 /**
  * Publish/validate flow — ported byte-for-byte from rouge's
- * `scripts/lib/release-notes-core.js`. STRICT PARITY for v0.1.0: this
- * replicates rouge's exact current write order (release file -> archive
- * copies -> delete unreleased -> refresh index) with NO transactional
- * rollback. That hardening is deferred to v0.1.1 (see the extraction plan).
+ * `scripts/lib/release-notes-core.js`. Happy-path write order (release file
+ * -> archive copies -> delete unreleased -> refresh index) matches rouge's
+ * original scripts exactly. `cutRelease` (bump -> publish -> validate) is
+ * transactional: it snapshots every file a cut can touch before the first
+ * write and rolls all of them back — manifest, notes-target output, and
+ * archived fragments restored to their original locations — if bump,
+ * publish, archive, or the final validation fails (PKG-140 finding 2).
  */
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
@@ -32,6 +35,7 @@ const fragments_1 = require("./fragments");
 const render_1 = require("./render");
 const notes_target_1 = require("./notes-target");
 const version_1 = require("./version");
+const fs_snapshot_1 = require("./fs-snapshot");
 var fragments_2 = require("./fragments");
 Object.defineProperty(exports, "collectFragments", { enumerable: true, get: function () { return fragments_2.collectFragments; } });
 function tryStep(errors, fn, fallback, prefix = '') {
@@ -217,9 +221,19 @@ function preflightCut(config, targetVersion, options, fragments) {
 /**
  * Bumps the manifest to the next (or explicit) version, publishes fragments
  * into a versioned release file, and validates the result — rouge's exact
- * current order (bump -> publish -> validate), matching `cut-release.js`.
+ * write order (bump -> publish -> validate), matching `cut-release.js`.
  * Fragments are collected once here and threaded through preflight/publish,
  * so the set that chose the version is provably the set that gets published.
+ *
+ * TRANSACTIONAL (PKG-140 finding 2): `preflightCut` validates everything it
+ * can before any write. Everything a cut can still touch after that —
+ * the manifest (via `config.manifest.snapshot`) and the notes target's
+ * output plus the fragments it archives (via `notesTarget.snapshot`) — is
+ * snapshotted BEFORE the bump, so a failure in bump, publish, archive, or
+ * the final validation restores every one of those files to its exact
+ * pre-cut bytes, including moving archived fragments back to `unreleased/`.
+ * A rollback failure is appended to (never replaces) the error that
+ * triggered it — see `rollbackOnFailure`.
  */
 function cutRelease(config, options = {}) {
     const previousVersion = resolveVersion(config);
@@ -233,22 +247,30 @@ function cutRelease(config, options = {}) {
         version = String(config.versionStrategy.next(previousVersion, { bump: level })).trim();
     }
     const preflight = preflightCut(config, version, options, fragments);
-    bumpVersion(config, { version });
-    const release = publishReleaseWithFragments(config, {
-        version,
-        date: options.date,
-        commit: options.commit,
-        force: options.force,
-        allowEmpty: options.allowEmpty,
-    }, fragments);
-    const validation = validateReleaseState(config, version);
-    if (!validation.ok) {
-        throw new Error(`Release ${version} was cut but failed validation:\n${validation.errors.join('\n')}`);
+    const rootDir = node_path_1.default.resolve(config.rootDir);
+    const notesTarget = resolveNotesTarget(config);
+    const date = options.date || (0, fragments_1.todayIso)();
+    const commit = String(options.commit || '');
+    const ctx = { version, date, commit, fragments };
+    const restore = (0, fs_snapshot_1.combineRestores)([
+        config.manifest.snapshot?.(rootDir) ?? (() => { }),
+        notesTarget.snapshot?.(config, ctx) ?? (() => { }),
+    ]);
+    try {
+        bumpVersion(config, { version });
+        const release = publishReleaseWithFragments(config, { version, date, commit, force: options.force, allowEmpty: options.allowEmpty }, fragments);
+        const validation = validateReleaseState(config, version);
+        if (!validation.ok) {
+            throw new Error(`Release ${version} was cut but failed validation:\n${validation.errors.join('\n')}`);
+        }
+        return {
+            previousVersion,
+            version,
+            fragmentCount: preflight.fragmentCount,
+            releasePath: release.releasePath,
+        };
     }
-    return {
-        previousVersion,
-        version,
-        fragmentCount: preflight.fragmentCount,
-        releasePath: release.releasePath,
-    };
+    catch (error) {
+        return (0, fs_snapshot_1.rollbackOnFailure)(restore, error);
+    }
 }

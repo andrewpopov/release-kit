@@ -30,7 +30,36 @@ export interface HygieneResult {
      * never read, and a fragment removed by this change is skipped.
      */
     trailingPeriodSummaryPatchNoteFiles: string[];
+    /**
+     * Loud, non-fatal warnings about reduced coverage. Populated only when
+     * `allowMissingHistory` downgraded an otherwise-fatal base-ref failure to
+     * a working-tree-only check (see `checkReleaseHygiene`). Empty in the
+     * normal case — `classifyReleaseHygiene` (which has no git access) always
+     * returns `[]` here; `checkReleaseHygiene` fills it in.
+     */
+    warnings: string[];
 }
+/**
+ * Why a git failure DURING hygiene must never be silently treated as "no
+ * changes": the classification below (`ok`) is a straightforward function of
+ * the changed-file set, so an empty set is indistinguishable from "nothing
+ * changed" — a gate that can't tell "clean" apart from "broken" will report
+ * clean. `kind` lets a caller (the CLI, or a programmatic consumer) give
+ * targeted advice instead of a raw git stderr dump; `message` is already a
+ * complete, actionable sentence on its own.
+ */
+export type HygieneGitFailureKind = 'git-unavailable' | 'not-a-git-repo' | 'base-ref-not-found' | 'insufficient-history' | 'git-command-failed';
+export declare class HygieneGitError extends Error {
+    readonly kind: HygieneGitFailureKind;
+    constructor(kind: HygieneGitFailureKind, message: string);
+}
+/**
+ * Collects the changed-file set hygiene classifies against. FAILS CLOSED:
+ * any git failure (missing binary, not a repo, an unresolvable base ref,
+ * insufficient history) throws a `HygieneGitError` instead of degrading to
+ * an empty (falsely-passing) result — see `checkReleaseHygiene` for the one
+ * explicit, opt-in way to downgrade a base-ref failure instead of failing.
+ */
 export declare function collectChangedFiles(rootDir: string, baseRef: string): string[];
 export declare function isPatchNoteArtifact(config: ReleaseKitConfig, filePath: string): boolean;
 /**
@@ -55,5 +84,19 @@ export declare function isReleaseRelevantFile(config: ReleaseKitConfig, filePath
 export declare function classifyReleaseHygiene(config: ReleaseKitConfig, changedFiles: string[]): HygieneResult;
 export interface CheckReleaseHygieneOptions {
     baseRef?: string;
+    /**
+     * Explicit, opt-in escape hatch for a consumer that genuinely cannot
+     * supply enough git history to compute a base-ref diff (see
+     * `HygieneConfig.allowMissingHistory`'s doc comment for when that's a
+     * legitimate situation vs. a checkout that should just fetch more history).
+     * Never defaults to `true`. When `true` AND the failure is specifically
+     * `base-ref-not-found` or `insufficient-history` (a history problem, not
+     * "git doesn't work at all"), hygiene falls back to a working-tree-only
+     * check and appends a warning to `HygieneResult.warnings` — it does NOT
+     * silently pass; the reduced coverage is reported loudly. `git-unavailable`
+     * and `not-a-git-repo` are never downgraded: those checkouts can't compute
+     * ANY diff, base-ref or otherwise, so there is nothing to fall back to.
+     */
+    allowMissingHistory?: boolean;
 }
 export declare function checkReleaseHygiene(config: ReleaseKitConfig, options?: CheckReleaseHygieneOptions): HygieneResult;
