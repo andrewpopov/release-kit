@@ -123,6 +123,7 @@ Each failure throws a `HygieneGitError` with a `kind` and an actionable
 | `not-a-git-repo` | The directory has no `.git` history | Run from a real git checkout |
 | `base-ref-not-found` | `baseRef` doesn't resolve (bad name, or never fetched into this checkout) | Verify the ref, or fetch it — a shallow CI checkout usually fetches only the current branch |
 | `insufficient-history` | Both refs exist but share no common commit in this checkout | Fetch full history, e.g. `actions/checkout` with `fetch-depth: 0`, or `git fetch --unshallow` |
+| `git-command-failed` | A git invocation failed some other way — including `merge-base` being killed by a signal, timing out, or a corrupt repository | Investigate the underlying git failure directly; this is never a missing-history problem |
 
 **This is a behavior change**: a `release:hygiene` run that used to silently
 pass with an unreachable `baseRef` (checking nothing) now fails the build.
@@ -130,11 +131,14 @@ The fix in almost every case is `fetch-depth: 0` (or fetching the base ref)
 in CI. If a consumer's CI genuinely cannot supply more history, set
 `hygiene.allowMissingHistory: true` in `release-kit.config.js` (or pass
 `--allow-missing-history`) — this is an **explicit, opt-in** escape hatch,
-never the default: it downgrades a `base-ref-not-found` or
+never the default: it downgrades ONLY a `base-ref-not-found` or
 `insufficient-history` failure to a working-tree-only check and prints a loud
 warning naming the reduced coverage, rather than failing or passing silently.
-It does NOT rescue `git-unavailable`/`not-a-git-repo` — those checkouts can't
-compute any diff at all, base-ref or otherwise.
+It does NOT rescue `git-unavailable`/`not-a-git-repo`/`git-command-failed` —
+the first two can't compute any diff at all, base-ref or otherwise, and the
+third means `merge-base` failed in some unrecognized way (a hung/killed/timed-out
+process, repo corruption, etc.) rather than cleanly rejecting the ref — never a
+missing-history problem, so it always fails closed regardless of this setting.
 
 ## Fragment format
 

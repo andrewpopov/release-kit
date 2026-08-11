@@ -66,6 +66,27 @@ function makeShallowNoCommonAncestorRepo(): string {
   return cloneDir;
 }
 
+/**
+ * Builds a `git` shim directory and prepends it onto PATH so it shadows the
+ * real `git`: every subcommand is passed straight through to the real `git`
+ * EXCEPT `merge-base`, which self-terminates with SIGTERM instead of
+ * running. This reproduces exactly what `execFileSync` reports for a
+ * `merge-base` that's killed by a signal or times out (`status: null`,
+ * `signal` set) — the "unrecognized, not a missing-history problem" shape
+ * PKG-140 finding C is about — instantly and deterministically, instead of
+ * waiting out the real 10s timeout.
+ */
+function makeMergeBaseKillingGitShim(): string {
+  const realGitPath = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+  const shimDir = makeTmpDir('release-kit-hygiene-shim-');
+  fs.writeFileSync(
+    path.join(shimDir, 'git'),
+    ['#!/bin/sh', 'if [ "$1" = "merge-base" ]; then', '  kill -TERM $$', '  sleep 5', 'fi', `exec "${realGitPath}" "$@"`, ''].join('\n'),
+    { mode: 0o755 },
+  );
+  return shimDir;
+}
+
 describe('hygiene fails CLOSED on git failures (PKG-140 finding 1)', () => {
   test('git binary unavailable throws git-unavailable and does NOT return an empty pass', () => {
     const rootDir = makeGitRoot();
@@ -223,6 +244,33 @@ describe('hygiene.allowMissingHistory — explicit, opt-in, loud downgrade', () 
       expect(result.warnings.length).toBeGreaterThan(0);
     } finally {
       fs.rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  test('an unrecognised (signal-terminated) merge-base failure fails closed even with allowMissingHistory enabled (PKG-140 finding C)', () => {
+    const rootDir = makeGitRoot();
+    const shimDir = makeMergeBaseKillingGitShim();
+    const originalPath = process.env.PATH;
+    try {
+      process.env.PATH = `${shimDir}${path.delimiter}${originalPath}`;
+      const config = makeRougeConfig(rootDir);
+      let caught: unknown;
+      try {
+        checkReleaseHygiene(config, { baseRef: 'HEAD', allowMissingHistory: true });
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(HygieneGitError);
+      // The whole point: this must NOT be classified as one of the two
+      // kinds allowMissingHistory is documented to rescue, so it must not
+      // have been rescued — it has to reach the caller as a thrown error.
+      expect((caught as HygieneGitError).kind).not.toBe('base-ref-not-found');
+      expect((caught as HygieneGitError).kind).not.toBe('insufficient-history');
+      expect((caught as HygieneGitError).kind).toBe('git-command-failed');
+    } finally {
+      process.env.PATH = originalPath;
+      fs.rmSync(rootDir, { recursive: true, force: true });
+      fs.rmSync(shimDir, { recursive: true, force: true });
     }
   });
 });

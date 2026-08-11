@@ -6,6 +6,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import type { Guard } from './fs-snapshot';
 import { combineRestores, snapshotFile } from './fs-snapshot';
 
 export interface VersionManifestAdapter {
@@ -15,15 +16,19 @@ export interface VersionManifestAdapter {
   validateVersionSync?(rootDir: string, version: string): string[];
   /**
    * Optional rollback support. Snapshots whatever `writeVersion` is about to
-   * touch and returns a function that restores it byte-for-byte. `cutRelease`
-   * calls this BEFORE `writeVersion` and invokes the returned function if a
-   * later step (publish, archive, validation) fails, so that failure doesn't
-   * leave the manifest bumped. Adapters that don't implement this are simply
+   * touch and returns a `Guard`: `cutRelease` calls this BEFORE
+   * `writeVersion`, calls the guard's `commit()` right after `writeVersion`
+   * returns successfully, and invokes `restore()` if a LATER step (publish,
+   * archive, validation) fails, so that failure doesn't leave the manifest
+   * bumped. `restore()` only overwrites a file whose current bytes still
+   * match what `commit()` observed — a legitimate concurrent edit made
+   * after `writeVersion` ran is left alone and reported, never clobbered
+   * (PKG-140 finding B). Adapters that don't implement this are simply
    * skipped by `cutRelease` — best effort, not required — so a custom
    * third-party adapter without `snapshot` degrades gracefully: the rest of
    * the cut still rolls back, just not the manifest.
    */
-  snapshot?(rootDir: string): () => void;
+  snapshot?(rootDir: string): Guard;
   /**
    * Optional: product name + repository URL for `ReleaseArtifactV1`
    * (PKG-140 finding 4). When omitted, `createReleaseArtifactV1` falls back
@@ -71,6 +76,11 @@ export function npmPackage(options: NpmPackageOptions = {}): VersionManifestAdap
   const packageFileName = options.packageFileName ?? 'package.json';
   const lockFileName = options.lockFileName ?? 'package-lock.json';
 
+  // Set by `snapshot()` (called BEFORE `writeVersion` by `cutRelease`) and
+  // read by `writeVersion` so each write can commit its OWN guard the
+  // instant it lands — see the comments inline below for why that matters.
+  let activeGuards: { pkg: Guard; lock: Guard } | undefined;
+
   function packagePath(rootDir: string): string {
     return path.join(rootDir, packageFileName);
   }
@@ -105,17 +115,38 @@ export function npmPackage(options: NpmPackageOptions = {}): VersionManifestAdap
 
     pkg.version = version;
     writeJsonFile(pkgPath, pkg);
+    // Commit the moment this write lands, not after the whole function
+    // returns: if the lock-file write below then throws, package.json's
+    // guard must already know these are OUR bytes, so a later rollback
+    // still restores it unconditionally (nothing has raced us for it yet)
+    // instead of mistaking its own bumped content for a stranger's edit.
+    activeGuards?.pkg.commit();
 
     if (lockFileExists && lock) {
       lock.version = version;
       ((lock.packages as JsonRecord)[''] as JsonRecord).version = version;
       writeJsonFile(lockFilePath, lock);
+      activeGuards?.lock.commit();
     }
   }
 
-  /** See `VersionManifestAdapter.snapshot`'s doc comment. */
-  function snapshot(rootDir: string): () => void {
-    return combineRestores([snapshotFile(packagePath(rootDir)), snapshotFile(lockPath(rootDir))]);
+  /**
+   * See `VersionManifestAdapter.snapshot`'s doc comment. Stashes the two
+   * per-file guards in `activeGuards` so `writeVersion` (called later, by
+   * `cutRelease`, using this SAME adapter instance) can commit each one the
+   * instant its own write lands — see the comments inside `writeVersion`.
+   */
+  function snapshot(rootDir: string): Guard {
+    const pkg = snapshotFile(packagePath(rootDir));
+    const lock = snapshotFile(lockPath(rootDir));
+    activeGuards = { pkg, lock };
+    return {
+      commit() {
+        pkg.commit();
+        lock.commit();
+      },
+      restore: combineRestores([pkg.restore, lock.restore]),
+    };
   }
 
   function validateVersionSync(rootDir: string, version: string): string[] {

@@ -26,6 +26,10 @@ function writeJsonFile(filePath, value) {
 function npmPackage(options = {}) {
     const packageFileName = options.packageFileName ?? 'package.json';
     const lockFileName = options.lockFileName ?? 'package-lock.json';
+    // Set by `snapshot()` (called BEFORE `writeVersion` by `cutRelease`) and
+    // read by `writeVersion` so each write can commit its OWN guard the
+    // instant it lands — see the comments inline below for why that matters.
+    let activeGuards;
     function packagePath(rootDir) {
         return node_path_1.default.join(rootDir, packageFileName);
     }
@@ -55,15 +59,36 @@ function npmPackage(options = {}) {
         }
         pkg.version = version;
         writeJsonFile(pkgPath, pkg);
+        // Commit the moment this write lands, not after the whole function
+        // returns: if the lock-file write below then throws, package.json's
+        // guard must already know these are OUR bytes, so a later rollback
+        // still restores it unconditionally (nothing has raced us for it yet)
+        // instead of mistaking its own bumped content for a stranger's edit.
+        activeGuards?.pkg.commit();
         if (lockFileExists && lock) {
             lock.version = version;
             lock.packages[''].version = version;
             writeJsonFile(lockFilePath, lock);
+            activeGuards?.lock.commit();
         }
     }
-    /** See `VersionManifestAdapter.snapshot`'s doc comment. */
+    /**
+     * See `VersionManifestAdapter.snapshot`'s doc comment. Stashes the two
+     * per-file guards in `activeGuards` so `writeVersion` (called later, by
+     * `cutRelease`, using this SAME adapter instance) can commit each one the
+     * instant its own write lands — see the comments inside `writeVersion`.
+     */
     function snapshot(rootDir) {
-        return (0, fs_snapshot_1.combineRestores)([(0, fs_snapshot_1.snapshotFile)(packagePath(rootDir)), (0, fs_snapshot_1.snapshotFile)(lockPath(rootDir))]);
+        const pkg = (0, fs_snapshot_1.snapshotFile)(packagePath(rootDir));
+        const lock = (0, fs_snapshot_1.snapshotFile)(lockPath(rootDir));
+        activeGuards = { pkg, lock };
+        return {
+            commit() {
+                pkg.commit();
+                lock.commit();
+            },
+            restore: (0, fs_snapshot_1.combineRestores)([pkg.restore, lock.restore]),
+        };
     }
     function validateVersionSync(rootDir, version) {
         const errors = [];

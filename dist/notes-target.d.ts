@@ -8,6 +8,7 @@
  */
 import type { ReleaseKitConfig } from './config';
 import type { Fragment } from './fragments';
+import type { Guard } from './fs-snapshot';
 export interface ReleaseNotesPublishContext {
     version: string;
     date: string;
@@ -44,13 +45,18 @@ export interface ReleaseNotesTarget {
      * Snapshots every file `publish(config, ctx, ...)` would touch for this
      * `ctx` (the output file/index AND the fragment files `ctx.fragments`
      * names, which `publish` moves from `unreleased/` into `archive/<version>/`)
-     * and returns a function that restores them all byte-for-byte, including
-     * putting moved fragments back at their original location. `cutRelease`
-     * calls this BEFORE `publish` and invokes the returned function if a later
-     * step fails. Both built-in targets implement it; a custom target that
-     * doesn't is skipped by `cutRelease` — best effort, not required.
+     * and returns a `Guard`. `cutRelease` calls this BEFORE `publish`, calls
+     * the guard's `commit()` right after `publish` returns successfully, and
+     * invokes `restore()` if a LATER step (validation) fails — restoring
+     * every touched file byte-for-byte, including putting moved fragments
+     * back at their original location, EXCEPT a file whose current contents
+     * no longer match what `commit()` observed: that one is left alone and
+     * reported instead of clobbered, since something else must have legitimately
+     * changed it since (PKG-140 finding B). Both built-in targets implement
+     * it; a custom target that doesn't is skipped by `cutRelease` — best
+     * effort, not required.
      */
-    snapshot?(config: ReleaseKitConfig, ctx: ReleaseNotesPublishContext): () => void;
+    snapshot?(config: ReleaseKitConfig, ctx: ReleaseNotesPublishContext): Guard;
 }
 /**
  * DEFAULT target: rouge's current behavior — a `releases/<version>.md` file

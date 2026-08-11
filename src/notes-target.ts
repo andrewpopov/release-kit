@@ -14,8 +14,8 @@ import { releaseLinkPath, resolvePaths } from './config';
 import type { Fragment } from './fragments';
 import { parseReleaseSummary, renderReleaseNote } from './render';
 import { listReleaseSummaries, tryStep, updatePatchNotesIndex } from './publish';
-import { combineRestores, snapshotFile } from './fs-snapshot';
-import type { Restore } from './fs-snapshot';
+import { combineRestores, describeError, snapshotDirectory, snapshotFile } from './fs-snapshot';
+import type { Guard } from './fs-snapshot';
 
 export interface ReleaseNotesPublishContext {
   version: string;
@@ -52,13 +52,18 @@ export interface ReleaseNotesTarget {
    * Snapshots every file `publish(config, ctx, ...)` would touch for this
    * `ctx` (the output file/index AND the fragment files `ctx.fragments`
    * names, which `publish` moves from `unreleased/` into `archive/<version>/`)
-   * and returns a function that restores them all byte-for-byte, including
-   * putting moved fragments back at their original location. `cutRelease`
-   * calls this BEFORE `publish` and invokes the returned function if a later
-   * step fails. Both built-in targets implement it; a custom target that
-   * doesn't is skipped by `cutRelease` — best effort, not required.
+   * and returns a `Guard`. `cutRelease` calls this BEFORE `publish`, calls
+   * the guard's `commit()` right after `publish` returns successfully, and
+   * invokes `restore()` if a LATER step (validation) fails — restoring
+   * every touched file byte-for-byte, including putting moved fragments
+   * back at their original location, EXCEPT a file whose current contents
+   * no longer match what `commit()` observed: that one is left alone and
+   * reported instead of clobbered, since something else must have legitimately
+   * changed it since (PKG-140 finding B). Both built-in targets implement
+   * it; a custom target that doesn't is skipped by `cutRelease` — best
+   * effort, not required.
    */
-  snapshot?(config: ReleaseKitConfig, ctx: ReleaseNotesPublishContext): () => void;
+  snapshot?(config: ReleaseKitConfig, ctx: ReleaseNotesPublishContext): Guard;
 }
 
 /** Archives consumed fragments to `archiveDir/<version>/` and deletes them from `unreleased/`. Shared by both targets. */
@@ -81,31 +86,75 @@ function archiveConsumedFragments(config: ReleaseKitConfig, version: string, fra
  * it back, not just re-creates a copy) and its future archive-copy
  * destination (so a rollback removes a partially-written copy rather than
  * leaving it behind). Also removes the `archiveDir/<version>/` directory on
- * rollback if this snapshot is the one that would have created it and it
- * ends up empty — an empty leftover directory isn't a content change (git
- * doesn't track empty dirs), so a failure tidying it up never masks the
- * file-level restore above it.
+ * rollback via `snapshotDirectory` if this snapshot is the one that would
+ * have created it and it ends up empty (PKG-140 finding D).
+ *
+ * ORDERING IS SAFETY-CRITICAL HERE (PKG-140 finding A): archiving a fragment
+ * is a MOVE, so at any moment its only surviving copy is either the
+ * unreleased/ source OR the archive copy, never both and — if we get this
+ * wrong — potentially NEITHER. On rollback we therefore always restore a
+ * fragment's SOURCE file first, and only delete its archive copy once that
+ * source restore has PROVABLY succeeded; if the source restore fails
+ * (disk full, permissions, I/O error) or has to be skipped (finding B — a
+ * concurrent write), the archive copy is deliberately left in place, so the
+ * fragment survives SOMEWHERE. This is spelled out as an explicit
+ * step-by-step loop below, top to bottom, rather than handed to
+ * `combineRestores` (whose reverse-of-given-order semantics is exactly what
+ * caused this bug the first time: the source restore was registered before
+ * the archive-copy restore, so it ran AFTER it) — do not "simplify" this
+ * back into a `combineRestores` call.
  */
-function snapshotArchivedFragments(archiveVersionDir: string, fragments: Fragment[]): Restore {
+function snapshotArchivedFragments(archiveVersionDir: string, fragments: Fragment[]): Guard {
   if (fragments.length === 0) {
-    return () => {};
+    return { commit() {}, restore: () => [] };
   }
-  const archiveDirExisted = fs.existsSync(archiveVersionDir);
-  const restoreFiles = combineRestores([
-    ...fragments.map((fragment) => snapshotFile(fragment.filePath)),
-    ...fragments.map((fragment) => snapshotFile(path.join(archiveVersionDir, fragment.fileName))),
-  ]);
-  return () => {
-    restoreFiles();
-    if (!archiveDirExisted) {
-      try {
-        if (fs.existsSync(archiveVersionDir) && fs.readdirSync(archiveVersionDir).length === 0) {
-          fs.rmdirSync(archiveVersionDir);
-        }
-      } catch {
-        // Best-effort tidy-up only — see doc comment above.
+  const restoreDir = snapshotDirectory(archiveVersionDir);
+  const perFragment = fragments.map((fragment) => ({
+    fileName: fragment.fileName,
+    source: snapshotFile(fragment.filePath),
+    archiveCopy: snapshotFile(path.join(archiveVersionDir, fragment.fileName)),
+  }));
+  return {
+    commit() {
+      for (const { source, archiveCopy } of perFragment) {
+        source.commit();
+        archiveCopy.commit();
       }
-    }
+    },
+    restore() {
+      const errors: unknown[] = [];
+      const skipped: string[] = [];
+      for (const { fileName, source, archiveCopy } of perFragment) {
+        let sourceRestored = false;
+        try {
+          const sourceSkips = source.restore();
+          skipped.push(...sourceSkips);
+          sourceRestored = sourceSkips.length === 0;
+        } catch (error) {
+          errors.push(error);
+        }
+        // Only remove the archive copy once the source is CONFIRMED back in
+        // place — see the doc comment above for why this order is
+        // load-bearing, not incidental.
+        if (sourceRestored) {
+          try {
+            skipped.push(...archiveCopy.restore());
+          } catch (error) {
+            errors.push(error);
+          }
+        } else {
+          skipped.push(
+            `${fileName}: archive copy left in place — its unreleased/ copy could not be safely restored (see above), ` +
+              'so removing the archive copy would leave the fragment in neither location.',
+          );
+        }
+      }
+      skipped.push(...restoreDir());
+      if (errors.length > 0) {
+        throw new Error(`Rollback failed for ${errors.length} fragment(s): ${errors.map(describeError).join('; ')}`);
+      }
+      return skipped;
+    },
   };
 }
 
@@ -166,11 +215,28 @@ export function patchNotesDirTarget(): ReleaseNotesTarget {
       const paths = resolvePaths(config);
       const releasePath = path.join(paths.releasesDir, config.versionStrategy.releaseFileName(ctx.version));
       const archiveVersionDir = path.join(paths.archiveDir, ctx.version);
-      return combineRestores([
-        snapshotFile(releasePath),
-        snapshotFile(paths.indexPath),
-        snapshotArchivedFragments(archiveVersionDir, ctx.fragments),
-      ]);
+      const releaseFileGuard = snapshotFile(releasePath);
+      const fragmentsGuard = snapshotArchivedFragments(archiveVersionDir, ctx.fragments);
+      const indexFileGuard = snapshotFile(paths.indexPath);
+      return {
+        commit() {
+          releaseFileGuard.commit();
+          fragmentsGuard.commit();
+          indexFileGuard.commit();
+        },
+        // Registered in the SAME order `publish()` writes them
+        // (releasesDir -> release file -> archived fragments -> index dir ->
+        // index file); `combineRestores` undoes them in reverse, i.e. the
+        // index file first and the releasesDir directory last — matching
+        // `publish()`'s write order run backwards.
+        restore: combineRestores([
+          snapshotDirectory(paths.releasesDir),
+          releaseFileGuard.restore,
+          fragmentsGuard.restore,
+          snapshotDirectory(path.dirname(paths.indexPath)),
+          indexFileGuard.restore,
+        ]),
+      };
     },
 
     validate(config, version) {
@@ -370,7 +436,18 @@ export function changelogTarget(options: ChangelogTargetOptions = {}): ReleaseNo
       const rootDir = path.resolve(config.rootDir);
       const changelogPath = path.join(rootDir, changelogRelPath);
       const archiveVersionDir = path.join(resolvePaths(config).archiveDir, ctx.version);
-      return combineRestores([snapshotFile(changelogPath), snapshotArchivedFragments(archiveVersionDir, ctx.fragments)]);
+      const changelogGuard = snapshotFile(changelogPath);
+      const fragmentsGuard = snapshotArchivedFragments(archiveVersionDir, ctx.fragments);
+      return {
+        commit() {
+          changelogGuard.commit();
+          fragmentsGuard.commit();
+        },
+        // Registered in `publish()`'s write order (changelog directory ->
+        // changelog file -> archived fragments); reversed on restore, same
+        // reasoning as `patchNotesDirTarget`'s `snapshot` above.
+        restore: combineRestores([snapshotDirectory(path.dirname(changelogPath)), changelogGuard.restore, fragmentsGuard.restore]),
+      };
     },
 
     validate(config, version) {

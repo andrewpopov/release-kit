@@ -3,6 +3,7 @@
  * consumer treats as the source of truth for its current version — for
  * rouge that's `package.json` (+ `package-lock.json`).
  */
+import type { Guard } from './fs-snapshot';
 export interface VersionManifestAdapter {
     readVersion(rootDir: string): string;
     writeVersion(rootDir: string, version: string): void;
@@ -10,15 +11,19 @@ export interface VersionManifestAdapter {
     validateVersionSync?(rootDir: string, version: string): string[];
     /**
      * Optional rollback support. Snapshots whatever `writeVersion` is about to
-     * touch and returns a function that restores it byte-for-byte. `cutRelease`
-     * calls this BEFORE `writeVersion` and invokes the returned function if a
-     * later step (publish, archive, validation) fails, so that failure doesn't
-     * leave the manifest bumped. Adapters that don't implement this are simply
+     * touch and returns a `Guard`: `cutRelease` calls this BEFORE
+     * `writeVersion`, calls the guard's `commit()` right after `writeVersion`
+     * returns successfully, and invokes `restore()` if a LATER step (publish,
+     * archive, validation) fails, so that failure doesn't leave the manifest
+     * bumped. `restore()` only overwrites a file whose current bytes still
+     * match what `commit()` observed — a legitimate concurrent edit made
+     * after `writeVersion` ran is left alone and reported, never clobbered
+     * (PKG-140 finding B). Adapters that don't implement this are simply
      * skipped by `cutRelease` — best effort, not required — so a custom
      * third-party adapter without `snapshot` degrades gracefully: the rest of
      * the cut still rolls back, just not the manifest.
      */
-    snapshot?(rootDir: string): () => void;
+    snapshot?(rootDir: string): Guard;
     /**
      * Optional: product name + repository URL for `ReleaseArtifactV1`
      * (PKG-140 finding 4). When omitted, `createReleaseArtifactV1` falls back

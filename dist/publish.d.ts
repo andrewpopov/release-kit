@@ -105,13 +105,20 @@ export interface CutReleaseResult {
  * so the set that chose the version is provably the set that gets published.
  *
  * TRANSACTIONAL (PKG-140 finding 2): `preflightCut` validates everything it
- * can before any write. Everything a cut can still touch after that —
- * the manifest (via `config.manifest.snapshot`) and the notes target's
- * output plus the fragments it archives (via `notesTarget.snapshot`) — is
- * snapshotted BEFORE the bump, so a failure in bump, publish, archive, or
- * the final validation restores every one of those files to its exact
- * pre-cut bytes, including moving archived fragments back to `unreleased/`.
- * A rollback failure is appended to (never replaces) the error that
- * triggered it — see `rollbackOnFailure`.
+ * can before any write. Everything a cut can still touch after that — the
+ * manifest (via `config.manifest.snapshot`), the two directories `archiveDir`/
+ * `unreleasedDir` may need creating (PKG-140 finding D), and the notes
+ * target's output plus the fragments it archives (via `notesTarget.snapshot`)
+ * — is snapshotted BEFORE the bump, so a failure in bump, publish, archive,
+ * or the final validation restores every one of those files to its exact
+ * pre-cut bytes, including moving archived fragments back to `unreleased/`
+ * and removing any directory the cut had to create along the way. Each
+ * guard's `commit()` is called right after the write phase it watches
+ * finishes successfully, so `restore()` can tell OUR OWN write apart from a
+ * legitimate concurrent edit landing afterwards and skip the latter instead
+ * of clobbering it (PKG-140 finding B) — see `Guard`'s doc comment in
+ * `fs-snapshot.ts`. A rollback failure is appended to (never replaces) the
+ * error that triggered it, and any skipped-due-to-conflict path is reported
+ * alongside it — see `rollbackOnFailure`.
  */
 export declare function cutRelease(config: ReleaseKitConfig, options?: CutReleaseOptions): CutReleaseResult;

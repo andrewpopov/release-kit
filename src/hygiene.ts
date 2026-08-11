@@ -83,7 +83,7 @@ export class HygieneGitError extends Error {
   }
 }
 
-type GitExecError = NodeJS.ErrnoException & { status?: number | null; stderr?: string };
+type GitExecError = NodeJS.ErrnoException & { status?: number | null; signal?: NodeJS.Signals | null; stderr?: string };
 
 /** Classifies a failed `execFileSync('git', args, ...)` call for `runGit`'s callers (i.e. every git invocation except `merge-base`, which needs its own ref-aware classification — see `resolveDiffBase`). */
 function classifyGitFailure(error: unknown, args: string[]): HygieneGitError {
@@ -155,10 +155,23 @@ function isShallowRepo(rootDir: string): boolean {
  * cleanly (per `git help merge-base`: status 1 means "no common ancestor
  * found", anything else is a hard error), so `status === 1` maps to
  * `insufficient-history` (the classic shallow-checkout shape: both refs exist
- * but share no history in THIS checkout) and everything else maps to
- * `base-ref-not-found` (bad ref name, or a ref never fetched into this
- * checkout — the two are not reliably distinguishable from git's error text
- * alone, so the message names both possible causes).
+ * but share no history in THIS checkout) and a NORMAL (non-signal) non-1 exit
+ * status maps to `base-ref-not-found` (bad ref name, or a ref never fetched
+ * into this checkout — the two are not reliably distinguishable from git's
+ * error text alone, so the message names both possible causes).
+ *
+ * A failure that DOESN'T fit either shape — `git merge-base` killed by a
+ * signal (including a timeout: `execFileSync`'s own timeout kills the child
+ * with SIGTERM, reported as a null `status` and a `signal`), or any other
+ * error with no normal exit status at all — is classified `git-command-failed`
+ * instead (PKG-140 finding C). This is NOT a cosmetic distinction:
+ * `checkReleaseHygiene`'s `allowMissingHistory` opt-out rescues ONLY
+ * `base-ref-not-found`/`insufficient-history`, so misclassifying a hung or
+ * killed git process (or repo corruption, or any other hard failure) as
+ * `base-ref-not-found` would let that opt-out silently rescue failures it was
+ * never meant to cover — an unrecognized failure must fail closed regardless
+ * of `allowMissingHistory`, which is the whole point of that flag being
+ * narrow.
  */
 function resolveDiffBase(rootDir: string, baseRef: string): string {
   const ref = String(baseRef || '').trim();
@@ -193,6 +206,22 @@ function resolveDiffBase(rootDir: string, baseRef: string): string {
             ? 'this checkout is shallow, so the history needed to compute the diff is missing.'
             : 'the two histories share no common commit reachable from this checkout.'
         } Fetch full history before running hygiene (e.g. \`actions/checkout\` with \`fetch-depth: 0\`, or \`git fetch --unshallow\`), or confirm "${ref}" is the right base ref.`,
+      );
+    }
+    // See the doc comment above: only a NORMAL exit status (git ran to
+    // completion and rejected the ref) is the bad-ref/never-fetched shape
+    // `base-ref-not-found` names below. Anything else — killed by a signal,
+    // timed out, or no exit status at all — did not run to completion for
+    // some OTHER reason, so it must never be lumped in with (and therefore
+    // rescuable as) a missing-history problem.
+    if (!err || typeof err.status !== 'number' || err.signal) {
+      const stderr = String(err?.stderr || '').trim();
+      throw new HygieneGitError(
+        'git-command-failed',
+        `Release hygiene could not run \`git ${args.join(' ')}\`: ${
+          stderr || err?.message || 'the process did not run to completion for an unrecognized reason'
+        }. This is NOT a missing-history failure (a bad ref name or shallow checkout) — hygiene.allowMissingHistory ` +
+          'does not cover it, so it fails closed regardless of that setting. Investigate the underlying git failure directly.',
       );
     }
     const stderr = String(err?.stderr || '').trim();

@@ -23,7 +23,7 @@ import type { ReleaseNotesPublishContext, ReleaseNotesTarget } from './notes-tar
 import { patchNotesDirTarget } from './notes-target';
 import type { BumpLevel } from './version';
 import { resolveBumpLevel } from './version';
-import { combineRestores, rollbackOnFailure } from './fs-snapshot';
+import { NOOP_GUARD, combineRestores, rollbackOnFailure, snapshotDirectory } from './fs-snapshot';
 
 export { collectFragments } from './fragments';
 
@@ -314,14 +314,21 @@ function preflightCut(
  * so the set that chose the version is provably the set that gets published.
  *
  * TRANSACTIONAL (PKG-140 finding 2): `preflightCut` validates everything it
- * can before any write. Everything a cut can still touch after that —
- * the manifest (via `config.manifest.snapshot`) and the notes target's
- * output plus the fragments it archives (via `notesTarget.snapshot`) — is
- * snapshotted BEFORE the bump, so a failure in bump, publish, archive, or
- * the final validation restores every one of those files to its exact
- * pre-cut bytes, including moving archived fragments back to `unreleased/`.
- * A rollback failure is appended to (never replaces) the error that
- * triggered it — see `rollbackOnFailure`.
+ * can before any write. Everything a cut can still touch after that — the
+ * manifest (via `config.manifest.snapshot`), the two directories `archiveDir`/
+ * `unreleasedDir` may need creating (PKG-140 finding D), and the notes
+ * target's output plus the fragments it archives (via `notesTarget.snapshot`)
+ * — is snapshotted BEFORE the bump, so a failure in bump, publish, archive,
+ * or the final validation restores every one of those files to its exact
+ * pre-cut bytes, including moving archived fragments back to `unreleased/`
+ * and removing any directory the cut had to create along the way. Each
+ * guard's `commit()` is called right after the write phase it watches
+ * finishes successfully, so `restore()` can tell OUR OWN write apart from a
+ * legitimate concurrent edit landing afterwards and skip the latter instead
+ * of clobbering it (PKG-140 finding B) — see `Guard`'s doc comment in
+ * `fs-snapshot.ts`. A rollback failure is appended to (never replaces) the
+ * error that triggered it, and any skipped-due-to-conflict path is reported
+ * alongside it — see `rollbackOnFailure`.
  */
 export function cutRelease(config: ReleaseKitConfig, options: CutReleaseOptions = {}): CutReleaseResult {
   const previousVersion = resolveVersion(config);
@@ -341,14 +348,27 @@ export function cutRelease(config: ReleaseKitConfig, options: CutReleaseOptions 
   const commit = String(options.commit || '');
   const ctx: ReleaseNotesPublishContext = { version, date, commit, fragments };
 
+  const paths = resolvePaths(config);
+  const manifestGuard = config.manifest.snapshot?.(rootDir) ?? NOOP_GUARD;
+  const notesGuard = notesTarget.snapshot?.(config, ctx) ?? NOOP_GUARD;
+  // Registered in the order these are actually touched (manifest, then the
+  // two directories `publishReleaseWithFragments` may create, then the
+  // notes target's own writes); `combineRestores` undoes them in reverse —
+  // the notes target first, the two directories next (by which point
+  // anything they held has already been cleaned up, so an empty one can
+  // actually be removed), and the manifest last.
   const restore = combineRestores([
-    config.manifest.snapshot?.(rootDir) ?? (() => {}),
-    notesTarget.snapshot?.(config, ctx) ?? (() => {}),
+    manifestGuard.restore,
+    snapshotDirectory(paths.unreleasedDir),
+    snapshotDirectory(paths.archiveDir),
+    notesGuard.restore,
   ]);
 
   try {
     bumpVersion(config, { version });
+    manifestGuard.commit();
     const release = publishReleaseWithFragments(config, { version, date, commit, force: options.force, allowEmpty: options.allowEmpty }, fragments);
+    notesGuard.commit();
     const validation = validateReleaseState(config, version);
     if (!validation.ok) {
       throw new Error(`Release ${version} was cut but failed validation:\n${validation.errors.join('\n')}`);

@@ -239,14 +239,21 @@ function preflightCut(config, targetVersion, options, fragments) {
  * so the set that chose the version is provably the set that gets published.
  *
  * TRANSACTIONAL (PKG-140 finding 2): `preflightCut` validates everything it
- * can before any write. Everything a cut can still touch after that —
- * the manifest (via `config.manifest.snapshot`) and the notes target's
- * output plus the fragments it archives (via `notesTarget.snapshot`) — is
- * snapshotted BEFORE the bump, so a failure in bump, publish, archive, or
- * the final validation restores every one of those files to its exact
- * pre-cut bytes, including moving archived fragments back to `unreleased/`.
- * A rollback failure is appended to (never replaces) the error that
- * triggered it — see `rollbackOnFailure`.
+ * can before any write. Everything a cut can still touch after that — the
+ * manifest (via `config.manifest.snapshot`), the two directories `archiveDir`/
+ * `unreleasedDir` may need creating (PKG-140 finding D), and the notes
+ * target's output plus the fragments it archives (via `notesTarget.snapshot`)
+ * — is snapshotted BEFORE the bump, so a failure in bump, publish, archive,
+ * or the final validation restores every one of those files to its exact
+ * pre-cut bytes, including moving archived fragments back to `unreleased/`
+ * and removing any directory the cut had to create along the way. Each
+ * guard's `commit()` is called right after the write phase it watches
+ * finishes successfully, so `restore()` can tell OUR OWN write apart from a
+ * legitimate concurrent edit landing afterwards and skip the latter instead
+ * of clobbering it (PKG-140 finding B) — see `Guard`'s doc comment in
+ * `fs-snapshot.ts`. A rollback failure is appended to (never replaces) the
+ * error that triggered it, and any skipped-due-to-conflict path is reported
+ * alongside it — see `rollbackOnFailure`.
  */
 function cutRelease(config, options = {}) {
     const previousVersion = resolveVersion(config);
@@ -265,13 +272,26 @@ function cutRelease(config, options = {}) {
     const date = options.date || (0, fragments_1.todayIso)();
     const commit = String(options.commit || '');
     const ctx = { version, date, commit, fragments };
+    const paths = (0, config_1.resolvePaths)(config);
+    const manifestGuard = config.manifest.snapshot?.(rootDir) ?? fs_snapshot_1.NOOP_GUARD;
+    const notesGuard = notesTarget.snapshot?.(config, ctx) ?? fs_snapshot_1.NOOP_GUARD;
+    // Registered in the order these are actually touched (manifest, then the
+    // two directories `publishReleaseWithFragments` may create, then the
+    // notes target's own writes); `combineRestores` undoes them in reverse —
+    // the notes target first, the two directories next (by which point
+    // anything they held has already been cleaned up, so an empty one can
+    // actually be removed), and the manifest last.
     const restore = (0, fs_snapshot_1.combineRestores)([
-        config.manifest.snapshot?.(rootDir) ?? (() => { }),
-        notesTarget.snapshot?.(config, ctx) ?? (() => { }),
+        manifestGuard.restore,
+        (0, fs_snapshot_1.snapshotDirectory)(paths.unreleasedDir),
+        (0, fs_snapshot_1.snapshotDirectory)(paths.archiveDir),
+        notesGuard.restore,
     ]);
     try {
         bumpVersion(config, { version });
+        manifestGuard.commit();
         const release = publishReleaseWithFragments(config, { version, date, commit, force: options.force, allowEmpty: options.allowEmpty }, fragments);
+        notesGuard.commit();
         const validation = validateReleaseState(config, version);
         if (!validation.ok) {
             throw new Error(`Release ${version} was cut but failed validation:\n${validation.errors.join('\n')}`);

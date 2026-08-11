@@ -38,32 +38,76 @@ function archiveConsumedFragments(config, version, fragments) {
  * it back, not just re-creates a copy) and its future archive-copy
  * destination (so a rollback removes a partially-written copy rather than
  * leaving it behind). Also removes the `archiveDir/<version>/` directory on
- * rollback if this snapshot is the one that would have created it and it
- * ends up empty — an empty leftover directory isn't a content change (git
- * doesn't track empty dirs), so a failure tidying it up never masks the
- * file-level restore above it.
+ * rollback via `snapshotDirectory` if this snapshot is the one that would
+ * have created it and it ends up empty (PKG-140 finding D).
+ *
+ * ORDERING IS SAFETY-CRITICAL HERE (PKG-140 finding A): archiving a fragment
+ * is a MOVE, so at any moment its only surviving copy is either the
+ * unreleased/ source OR the archive copy, never both and — if we get this
+ * wrong — potentially NEITHER. On rollback we therefore always restore a
+ * fragment's SOURCE file first, and only delete its archive copy once that
+ * source restore has PROVABLY succeeded; if the source restore fails
+ * (disk full, permissions, I/O error) or has to be skipped (finding B — a
+ * concurrent write), the archive copy is deliberately left in place, so the
+ * fragment survives SOMEWHERE. This is spelled out as an explicit
+ * step-by-step loop below, top to bottom, rather than handed to
+ * `combineRestores` (whose reverse-of-given-order semantics is exactly what
+ * caused this bug the first time: the source restore was registered before
+ * the archive-copy restore, so it ran AFTER it) — do not "simplify" this
+ * back into a `combineRestores` call.
  */
 function snapshotArchivedFragments(archiveVersionDir, fragments) {
     if (fragments.length === 0) {
-        return () => { };
+        return { commit() { }, restore: () => [] };
     }
-    const archiveDirExisted = node_fs_1.default.existsSync(archiveVersionDir);
-    const restoreFiles = (0, fs_snapshot_1.combineRestores)([
-        ...fragments.map((fragment) => (0, fs_snapshot_1.snapshotFile)(fragment.filePath)),
-        ...fragments.map((fragment) => (0, fs_snapshot_1.snapshotFile)(node_path_1.default.join(archiveVersionDir, fragment.fileName))),
-    ]);
-    return () => {
-        restoreFiles();
-        if (!archiveDirExisted) {
-            try {
-                if (node_fs_1.default.existsSync(archiveVersionDir) && node_fs_1.default.readdirSync(archiveVersionDir).length === 0) {
-                    node_fs_1.default.rmdirSync(archiveVersionDir);
+    const restoreDir = (0, fs_snapshot_1.snapshotDirectory)(archiveVersionDir);
+    const perFragment = fragments.map((fragment) => ({
+        fileName: fragment.fileName,
+        source: (0, fs_snapshot_1.snapshotFile)(fragment.filePath),
+        archiveCopy: (0, fs_snapshot_1.snapshotFile)(node_path_1.default.join(archiveVersionDir, fragment.fileName)),
+    }));
+    return {
+        commit() {
+            for (const { source, archiveCopy } of perFragment) {
+                source.commit();
+                archiveCopy.commit();
+            }
+        },
+        restore() {
+            const errors = [];
+            const skipped = [];
+            for (const { fileName, source, archiveCopy } of perFragment) {
+                let sourceRestored = false;
+                try {
+                    const sourceSkips = source.restore();
+                    skipped.push(...sourceSkips);
+                    sourceRestored = sourceSkips.length === 0;
+                }
+                catch (error) {
+                    errors.push(error);
+                }
+                // Only remove the archive copy once the source is CONFIRMED back in
+                // place — see the doc comment above for why this order is
+                // load-bearing, not incidental.
+                if (sourceRestored) {
+                    try {
+                        skipped.push(...archiveCopy.restore());
+                    }
+                    catch (error) {
+                        errors.push(error);
+                    }
+                }
+                else {
+                    skipped.push(`${fileName}: archive copy left in place — its unreleased/ copy could not be safely restored (see above), ` +
+                        'so removing the archive copy would leave the fragment in neither location.');
                 }
             }
-            catch {
-                // Best-effort tidy-up only — see doc comment above.
+            skipped.push(...restoreDir());
+            if (errors.length > 0) {
+                throw new Error(`Rollback failed for ${errors.length} fragment(s): ${errors.map(fs_snapshot_1.describeError).join('; ')}`);
             }
-        }
+            return skipped;
+        },
     };
 }
 function validateReleaseFile(config, errors, rootDir, releasePath, expectedVersion) {
@@ -114,11 +158,28 @@ function patchNotesDirTarget() {
             const paths = (0, config_1.resolvePaths)(config);
             const releasePath = node_path_1.default.join(paths.releasesDir, config.versionStrategy.releaseFileName(ctx.version));
             const archiveVersionDir = node_path_1.default.join(paths.archiveDir, ctx.version);
-            return (0, fs_snapshot_1.combineRestores)([
-                (0, fs_snapshot_1.snapshotFile)(releasePath),
-                (0, fs_snapshot_1.snapshotFile)(paths.indexPath),
-                snapshotArchivedFragments(archiveVersionDir, ctx.fragments),
-            ]);
+            const releaseFileGuard = (0, fs_snapshot_1.snapshotFile)(releasePath);
+            const fragmentsGuard = snapshotArchivedFragments(archiveVersionDir, ctx.fragments);
+            const indexFileGuard = (0, fs_snapshot_1.snapshotFile)(paths.indexPath);
+            return {
+                commit() {
+                    releaseFileGuard.commit();
+                    fragmentsGuard.commit();
+                    indexFileGuard.commit();
+                },
+                // Registered in the SAME order `publish()` writes them
+                // (releasesDir -> release file -> archived fragments -> index dir ->
+                // index file); `combineRestores` undoes them in reverse, i.e. the
+                // index file first and the releasesDir directory last — matching
+                // `publish()`'s write order run backwards.
+                restore: (0, fs_snapshot_1.combineRestores)([
+                    (0, fs_snapshot_1.snapshotDirectory)(paths.releasesDir),
+                    releaseFileGuard.restore,
+                    fragmentsGuard.restore,
+                    (0, fs_snapshot_1.snapshotDirectory)(node_path_1.default.dirname(paths.indexPath)),
+                    indexFileGuard.restore,
+                ]),
+            };
         },
         validate(config, version) {
             const errors = [];
@@ -295,7 +356,18 @@ function changelogTarget(options = {}) {
             const rootDir = node_path_1.default.resolve(config.rootDir);
             const changelogPath = node_path_1.default.join(rootDir, changelogRelPath);
             const archiveVersionDir = node_path_1.default.join((0, config_1.resolvePaths)(config).archiveDir, ctx.version);
-            return (0, fs_snapshot_1.combineRestores)([(0, fs_snapshot_1.snapshotFile)(changelogPath), snapshotArchivedFragments(archiveVersionDir, ctx.fragments)]);
+            const changelogGuard = (0, fs_snapshot_1.snapshotFile)(changelogPath);
+            const fragmentsGuard = snapshotArchivedFragments(archiveVersionDir, ctx.fragments);
+            return {
+                commit() {
+                    changelogGuard.commit();
+                    fragmentsGuard.commit();
+                },
+                // Registered in `publish()`'s write order (changelog directory ->
+                // changelog file -> archived fragments); reversed on restore, same
+                // reasoning as `patchNotesDirTarget`'s `snapshot` above.
+                restore: (0, fs_snapshot_1.combineRestores)([(0, fs_snapshot_1.snapshotDirectory)(node_path_1.default.dirname(changelogPath)), changelogGuard.restore, fragmentsGuard.restore]),
+            };
         },
         validate(config, version) {
             const rootDir = node_path_1.default.resolve(config.rootDir);

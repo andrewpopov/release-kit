@@ -26,14 +26,20 @@ export interface HygieneConfig {
   /**
    * Explicit, opt-in escape hatch for a consumer whose CI genuinely cannot
    * supply a resolvable `baseRef` (e.g. a checkout that structurally cannot
-   * fetch more history). When `true`, `checkReleaseHygiene` downgrades a
-   * `base-ref-not-found` or `insufficient-history` failure to a
-   * working-tree-only check instead of failing closed, and reports the
-   * reduced coverage via `HygieneResult.warnings` — LOUDLY, not silently.
-   * Defaults to `false`/unset; MUST NOT be treated as the default for a
-   * shallow-checkout problem — the fix for that is `fetch-depth: 0` (or
-   * fetching the base ref), not this flag. Never downgrades `git-unavailable`
-   * or `not-a-git-repo`: those checkouts can't diff anything at all.
+   * fetch more history). When `true`, `checkReleaseHygiene` downgrades ONLY
+   * a `base-ref-not-found` or `insufficient-history` failure — the two
+   * shapes documented on `HygieneGitFailureKind` as "a bad/unfetched ref" and
+   * "a shallow checkout with no shared history" — to a working-tree-only
+   * check instead of failing closed, and reports the reduced coverage via
+   * `HygieneResult.warnings` — LOUDLY, not silently. Defaults to
+   * `false`/unset; MUST NOT be treated as the default for a shallow-checkout
+   * problem — the fix for that is `fetch-depth: 0` (or fetching the base
+   * ref), not this flag. Every OTHER `merge-base` failure — `git-unavailable`,
+   * `not-a-git-repo`, and `git-command-failed` (a hung/killed/timed-out git
+   * process, repo corruption, or any other failure that isn't cleanly one of
+   * the two rescuable shapes) — is NEVER downgraded, deliberately: an
+   * unrecognized git failure fails closed regardless of this setting
+   * (PKG-140 finding C).
    */
   allowMissingHistory?: boolean;
   /** Path prefixes (relative, POSIX-style) that are always release-relevant. */
