@@ -90,5 +90,19 @@ function npmPackage(options = {}) {
         }
         return errors;
     }
-    return { readVersion, writeVersion, validateVersionSync, snapshot };
+    /**
+     * Preserves, byte-for-byte, the product/repository derivation
+     * `createReleaseArtifactV1` used to inline before PKG-140 finding 4: the
+     * package's `name` (falling back to the root directory's basename) and its
+     * `repository` field (a bare string, or `{ url }`, falling back to
+     * `rootDir`). Moving it here — rather than changing what it returns — is
+     * what keeps `npmPackage()` behaving exactly as it did for existing
+     * consumers.
+     */
+    function readArtifactMetadata(rootDir) {
+        const pkg = readJsonFile(packagePath(rootDir));
+        const repository = typeof pkg.repository === 'string' ? pkg.repository : pkg.repository?.url ?? rootDir;
+        return { product: pkg.name ?? node_path_1.default.basename(rootDir), repository };
+    }
+    return { readVersion, writeVersion, validateVersionSync, snapshot, readArtifactMetadata };
 }

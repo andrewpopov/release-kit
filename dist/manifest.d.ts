@@ -19,6 +19,19 @@ export interface VersionManifestAdapter {
      * the cut still rolls back, just not the manifest.
      */
     snapshot?(rootDir: string): () => void;
+    /**
+     * Optional: product name + repository URL for `ReleaseArtifactV1`
+     * (PKG-140 finding 4). When omitted, `createReleaseArtifactV1` falls back
+     * to `config.productName` for `product` and `rootDir` for `repository` —
+     * it never reads a manifest file directly, so a custom adapter with no
+     * `package.json` at the root can still produce a valid artifact. Either
+     * returned field may itself be omitted; each falls back independently.
+     */
+    readArtifactMetadata?(rootDir: string): ArtifactMetadata;
+}
+export interface ArtifactMetadata {
+    product?: string;
+    repository?: string;
 }
 export interface NpmPackageOptions {
     /**

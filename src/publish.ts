@@ -171,6 +171,10 @@ export interface PublishReleaseResult {
   version: string;
   releasePath: string;
   fragmentCount: number;
+  /** This release's rendered notes, as returned by the notes target's `publish` (PKG-140 finding 3). */
+  content: string;
+  /** This release's date, as returned by the notes target's `publish` — never re-derived by re-parsing `releasePath`. */
+  date: string;
 }
 
 export interface ReleaseArtifactV1 {
@@ -178,16 +182,29 @@ export interface ReleaseArtifactV1 {
   renderedNotes: string; notesDigest: string; artifactRef: string; fragmentCount: number;
 }
 
-/** Build a deterministic, transport-neutral descriptor only after validation succeeds. */
+/**
+ * Build a deterministic, transport-neutral descriptor only after validation
+ * succeeds. `renderedNotes`/`date` come from `result` — which the notes
+ * target itself returned from `publish` — rather than re-reading and
+ * re-parsing `result.releasePath`: a target's on-disk file may be a whole
+ * cumulative document (e.g. `changelogTarget()`'s `CHANGELOG.md`) that a
+ * blind re-parse can't tell apart from the one release just cut (PKG-140
+ * finding 3). Likewise `product`/`repository` come from the configured
+ * `VersionManifestAdapter` (or generic fallbacks), never from reading
+ * `package.json` directly, so a consumer with a non-npm manifest adapter and
+ * no `package.json` at the root can still produce a valid artifact (PKG-140
+ * finding 4).
+ */
 export function createReleaseArtifactV1(config: ReleaseKitConfig, result: PublishReleaseResult, commit = ''): ReleaseArtifactV1 {
   const validation = validateReleaseState(config, result.version);
   if (!validation.ok) throw new Error(`Release ${result.version} is not validated: ${validation.errors.join('; ')}`);
   const rootDir = path.resolve(config.rootDir);
-  const renderedNotes = fs.readFileSync(result.releasePath, 'utf8');
-  const manifest = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8')) as { name?: string; repository?: string | { url?: string } };
-  const repository = typeof manifest.repository === 'string' ? manifest.repository : manifest.repository?.url ?? rootDir;
-  return Object.freeze({ schemaVersion: 1, product: manifest.name ?? path.basename(rootDir), repository, version: result.version,
-    commit: commit || getGitShortSha(rootDir), date: parseReleaseSummary(config, result.releasePath).date, renderedNotes,
+  const renderedNotes = result.content;
+  const metadata = config.manifest.readArtifactMetadata?.(rootDir) ?? {};
+  const product = metadata.product ?? config.productName;
+  const repository = metadata.repository ?? rootDir;
+  return Object.freeze({ schemaVersion: 1, product, repository, version: result.version,
+    commit: commit || getGitShortSha(rootDir), date: result.date, renderedNotes,
     notesDigest: createHash('sha256').update(renderedNotes).digest('hex'), artifactRef: path.relative(rootDir, result.releasePath), fragmentCount: result.fragmentCount });
 }
 
@@ -211,12 +228,12 @@ function publishReleaseWithFragments(
   if (fragments.length === 0 && !options.allowEmpty) {
     throw new Error('No unreleased patch-note fragments found. Use --allow-empty to publish an empty note.');
   }
-  const { releasePath } = resolveNotesTarget(config).publish(
+  const published = resolveNotesTarget(config).publish(
     config,
     { version, date, commit: String(options.commit || ''), fragments },
     { force: options.force },
   );
-  return { version, releasePath, fragmentCount: fragments.length };
+  return { version, releasePath: published.releasePath, fragmentCount: fragments.length, content: published.content, date: published.date };
 }
 
 export function publishRelease(config: ReleaseKitConfig, options: PublishReleaseOptions = {}): PublishReleaseResult {
@@ -258,6 +275,10 @@ export interface CutReleaseResult {
   version: string;
   fragmentCount: number;
   releasePath: string;
+  /** This release's rendered notes, as returned by the notes target's `publish` (PKG-140 finding 3). */
+  content: string;
+  /** This release's date, as returned by the notes target's `publish`. */
+  date: string;
 }
 
 /**
@@ -337,6 +358,8 @@ export function cutRelease(config: ReleaseKitConfig, options: CutReleaseOptions 
       version,
       fragmentCount: preflight.fragmentCount,
       releasePath: release.releasePath,
+      content: release.content,
+      date: release.date,
     };
   } catch (error) {
     return rollbackOnFailure(restore, error);

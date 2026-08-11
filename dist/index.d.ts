@@ -3,7 +3,7 @@ export type { ReleaseKitConfig, ReleaseKitPaths, ReleaseKindDef, HygieneConfig, 
 export { alphaSemver, stableSemver, ALPHA_VERSION_RE, STABLE_VERSION_RE, resolveBumpLevel, DEFAULT_KIND_BUMP } from './version';
 export type { VersionStrategy, AlphaSemverOptions, StableSemverOptions, BumpLevel, VersionBumpContext } from './version';
 export { npmPackage } from './manifest';
-export type { VersionManifestAdapter, NpmPackageOptions } from './manifest';
+export type { VersionManifestAdapter, NpmPackageOptions, ArtifactMetadata } from './manifest';
 export { parseFrontMatter, slugify, todayIso, isFragmentFile, parseFragment, collectFragments, normalizeFragmentBody, writeNewFragment, } from './fragments';
 export type { Fragment, ParsedFrontMatter, WriteNewFragmentOptions } from './fragments';
 export { renderReleaseNote, parseReleaseSummary, renderPatchNotesIndex } from './render';

@@ -8,7 +8,7 @@ export { alphaSemver, stableSemver, ALPHA_VERSION_RE, STABLE_VERSION_RE, resolve
 export type { VersionStrategy, AlphaSemverOptions, StableSemverOptions, BumpLevel, VersionBumpContext } from './version';
 
 export { npmPackage } from './manifest';
-export type { VersionManifestAdapter, NpmPackageOptions } from './manifest';
+export type { VersionManifestAdapter, NpmPackageOptions, ArtifactMetadata } from './manifest';
 
 export {
   parseFrontMatter,

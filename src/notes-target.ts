@@ -25,12 +25,24 @@ export interface ReleaseNotesPublishContext {
 }
 
 export interface ReleaseNotesTarget {
-  /** Write the version's notes into the target and consume its fragments. Returns the written file path. */
+  /**
+   * Write the version's notes into the target and consume its fragments.
+   * Returns the written file path AND the immutable artifact content for
+   * THIS release: `content` is the rendered notes for `ctx.version` alone
+   * (never the whole file a target may share across versions, e.g.
+   * `changelogTarget`'s cumulative `CHANGELOG.md`), and `date` is the date
+   * the target actually rendered with (`ctx.date`), not something a caller
+   * has to re-derive by re-parsing the written file. `createReleaseArtifactV1`
+   * uses these directly instead of re-parsing `releasePath` — re-parsing is
+   * what let a target-specific file shape (no `Release date:` line, notes for
+   * every historical version) leak into the "one release" artifact (PKG-140
+   * finding 3).
+   */
   publish(
     config: ReleaseKitConfig,
     ctx: ReleaseNotesPublishContext,
     options: { force?: boolean },
-  ): { releasePath: string };
+  ): { releasePath: string; content: string; date: string };
   /** Return validation error strings for the target's state at `version` (empty array = ok). */
   validate(config: ReleaseKitConfig, version: string): string[];
   /** Returns whether `version`'s notes already exist in the target (checked pre-mutation by `preflightCut`). */
@@ -138,14 +150,11 @@ export function patchNotesDirTarget(): ReleaseNotesTarget {
       if (fs.existsSync(releasePath) && !options.force) {
         throw new Error(`${path.relative(paths.rootDir, releasePath)} already exists. Re-run with --force to overwrite it.`);
       }
-      fs.writeFileSync(
-        releasePath,
-        renderReleaseNote(config, { version: ctx.version, date: ctx.date, fragments: ctx.fragments, commit: ctx.commit }),
-        'utf8',
-      );
+      const content = renderReleaseNote(config, { version: ctx.version, date: ctx.date, fragments: ctx.fragments, commit: ctx.commit });
+      fs.writeFileSync(releasePath, content, 'utf8');
       archiveConsumedFragments(config, ctx.version, ctx.fragments);
       updatePatchNotesIndex(config, ctx.version);
-      return { releasePath };
+      return { releasePath, content, date: ctx.date };
     },
 
     hasVersion(config, version) {
@@ -341,7 +350,10 @@ export function changelogTarget(options: ChangelogTargetOptions = {}): ReleaseNo
       fs.mkdirSync(path.dirname(changelogPath), { recursive: true });
       fs.writeFileSync(changelogPath, nextContent, 'utf8');
       archiveConsumedFragments(config, ctx.version, ctx.fragments);
-      return { releasePath: changelogPath };
+      // The artifact's `content` is just-this-release's section (never the
+      // whole, possibly-cumulative `changelogPath`), normalized to a single
+      // trailing newline like `patchNotesDirTarget`'s file content.
+      return { releasePath: changelogPath, content: `${section.replace(/\n+$/, '')}\n`, date: ctx.date };
     },
 
     hasVersion(config, version) {

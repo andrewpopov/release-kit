@@ -24,6 +24,20 @@ export interface VersionManifestAdapter {
    * the cut still rolls back, just not the manifest.
    */
   snapshot?(rootDir: string): () => void;
+  /**
+   * Optional: product name + repository URL for `ReleaseArtifactV1`
+   * (PKG-140 finding 4). When omitted, `createReleaseArtifactV1` falls back
+   * to `config.productName` for `product` and `rootDir` for `repository` —
+   * it never reads a manifest file directly, so a custom adapter with no
+   * `package.json` at the root can still produce a valid artifact. Either
+   * returned field may itself be omitted; each falls back independently.
+   */
+  readArtifactMetadata?(rootDir: string): ArtifactMetadata;
+}
+
+export interface ArtifactMetadata {
+  product?: string;
+  repository?: string;
 }
 
 interface JsonRecord {
@@ -129,5 +143,20 @@ export function npmPackage(options: NpmPackageOptions = {}): VersionManifestAdap
     return errors;
   }
 
-  return { readVersion, writeVersion, validateVersionSync, snapshot };
+  /**
+   * Preserves, byte-for-byte, the product/repository derivation
+   * `createReleaseArtifactV1` used to inline before PKG-140 finding 4: the
+   * package's `name` (falling back to the root directory's basename) and its
+   * `repository` field (a bare string, or `{ url }`, falling back to
+   * `rootDir`). Moving it here — rather than changing what it returns — is
+   * what keeps `npmPackage()` behaving exactly as it did for existing
+   * consumers.
+   */
+  function readArtifactMetadata(rootDir: string): ArtifactMetadata {
+    const pkg = readJsonFile(packagePath(rootDir)) as { name?: string; repository?: string | { url?: string } };
+    const repository = typeof pkg.repository === 'string' ? pkg.repository : pkg.repository?.url ?? rootDir;
+    return { product: pkg.name ?? path.basename(rootDir), repository };
+  }
+
+  return { readVersion, writeVersion, validateVersionSync, snapshot, readArtifactMetadata };
 }

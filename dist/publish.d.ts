@@ -42,6 +42,10 @@ export interface PublishReleaseResult {
     version: string;
     releasePath: string;
     fragmentCount: number;
+    /** This release's rendered notes, as returned by the notes target's `publish` (PKG-140 finding 3). */
+    content: string;
+    /** This release's date, as returned by the notes target's `publish` — never re-derived by re-parsing `releasePath`. */
+    date: string;
 }
 export interface ReleaseArtifactV1 {
     schemaVersion: 1;
@@ -55,7 +59,19 @@ export interface ReleaseArtifactV1 {
     artifactRef: string;
     fragmentCount: number;
 }
-/** Build a deterministic, transport-neutral descriptor only after validation succeeds. */
+/**
+ * Build a deterministic, transport-neutral descriptor only after validation
+ * succeeds. `renderedNotes`/`date` come from `result` — which the notes
+ * target itself returned from `publish` — rather than re-reading and
+ * re-parsing `result.releasePath`: a target's on-disk file may be a whole
+ * cumulative document (e.g. `changelogTarget()`'s `CHANGELOG.md`) that a
+ * blind re-parse can't tell apart from the one release just cut (PKG-140
+ * finding 3). Likewise `product`/`repository` come from the configured
+ * `VersionManifestAdapter` (or generic fallbacks), never from reading
+ * `package.json` directly, so a consumer with a non-npm manifest adapter and
+ * no `package.json` at the root can still produce a valid artifact (PKG-140
+ * finding 4).
+ */
 export declare function createReleaseArtifactV1(config: ReleaseKitConfig, result: PublishReleaseResult, commit?: string): ReleaseArtifactV1;
 export declare function publishRelease(config: ReleaseKitConfig, options?: PublishReleaseOptions): PublishReleaseResult;
 export interface ValidateReleaseStateResult {
@@ -76,6 +92,10 @@ export interface CutReleaseResult {
     version: string;
     fragmentCount: number;
     releasePath: string;
+    /** This release's rendered notes, as returned by the notes target's `publish` (PKG-140 finding 3). */
+    content: string;
+    /** This release's date, as returned by the notes target's `publish`. */
+    date: string;
 }
 /**
  * Bumps the manifest to the next (or explicit) version, publishes fragments

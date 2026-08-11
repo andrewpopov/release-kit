@@ -184,6 +184,46 @@ implementations support this; a custom adapter/target that doesn't implement
 the optional `snapshot` method is skipped — the rest of the cut still rolls
 back, just not that piece.
 
+### `ReleaseArtifactV1`
+
+`publish --json` and `cut --json` (and the `createReleaseArtifactV1(config,
+result, commit?)` function) emit a deterministic, transport-neutral
+descriptor of the release just produced — built only after `validateReleaseState`
+confirms it, never before:
+
+```ts
+interface ReleaseArtifactV1 {
+  schemaVersion: 1;
+  product: string;
+  repository: string;
+  version: string;
+  commit: string;
+  date: string;
+  renderedNotes: string;
+  notesDigest: string; // sha256 of renderedNotes
+  artifactRef: string; // releasePath, relative to rootDir
+  fragmentCount: number;
+}
+```
+
+`renderedNotes`/`date` come from the notes target itself — `publish` returns
+`{ releasePath, content, date }`, and the artifact uses `content`/`date`
+verbatim rather than re-reading and re-parsing `releasePath`. This matters
+because a target's on-disk file isn't always scoped to one release:
+`changelogTarget()`'s `releasePath` is the whole, cumulative `CHANGELOG.md`,
+so `content` is specifically THIS version's section (never the full file),
+and `date` is the date `publish` actually rendered with (never derived from a
+`Release date:` line that a flat changelog section doesn't have). A custom
+`ReleaseNotesTarget` must return both fields for its artifacts to be valid.
+
+`product`/`repository` come from `config.manifest.readArtifactMetadata?.(rootDir)`
+— an optional method on `VersionManifestAdapter` — falling back to
+`config.productName`/`rootDir` when the adapter doesn't implement it or omits
+a field. `createReleaseArtifactV1` never reads a manifest file directly, so a
+consumer with a custom (non-npm) manifest adapter and no `package.json` at
+the root can still produce a valid artifact. `npmPackage()` implements
+`readArtifactMetadata` by reading `name`/`repository` off `package.json`.
+
 ## Notes targets
 
 Where a cut writes its notes is a pluggable seam. `config.notesTarget` selects
@@ -219,7 +259,11 @@ Both targets satisfy the same `ReleaseNotesTarget` interface (`publish`,
 support), so the `bump → publish → validate` cut flow is identical regardless
 of output format. Write your own target to render release notes anywhere
 else; implement `snapshot` too if you want `cutRelease` to roll it back on
-failure.
+failure. `publish` must return `{ releasePath, content, date }`: `content` is
+the rendered notes for the version just published — scoped to that release
+alone, even if `releasePath` is a file a target shares across versions — and
+`date` is the date it rendered with. `createReleaseArtifactV1` (see
+`ReleaseArtifactV1` above) uses those two fields verbatim.
 
 ## The config seam (`ReleaseKitConfig`)
 
@@ -259,6 +303,7 @@ interface VersionManifestAdapter {
   writeVersion(rootDir: string, version: string): void;
   validateVersionSync?(rootDir: string, version: string): string[];
   snapshot?(rootDir: string): () => void;
+  readArtifactMetadata?(rootDir: string): { product?: string; repository?: string };
 }
 ```
 
@@ -268,7 +313,11 @@ OPTIONAL-lockfile mode: a missing lockfile is not an error, so non-npm
 consumers aren't blocked). It shape-validates a present lockfile BEFORE
 writing `package.json`, so a malformed lockfile fails before either file is
 touched, and it implements `snapshot` so `cutRelease` can roll a failed cut's
-manifest changes back byte-for-byte.
+manifest changes back byte-for-byte. It also implements
+`readArtifactMetadata` (`product`/`repository` from `package.json`'s `name`
+and `repository` fields) for `createReleaseArtifactV1`; a custom adapter that
+omits it (or a field of it) falls back to `config.productName`/`rootDir`
+instead of release-kit reading a manifest file on its own.
 
 ## Reusable API
 

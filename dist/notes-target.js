@@ -100,10 +100,11 @@ function patchNotesDirTarget() {
             if (node_fs_1.default.existsSync(releasePath) && !options.force) {
                 throw new Error(`${node_path_1.default.relative(paths.rootDir, releasePath)} already exists. Re-run with --force to overwrite it.`);
             }
-            node_fs_1.default.writeFileSync(releasePath, (0, render_1.renderReleaseNote)(config, { version: ctx.version, date: ctx.date, fragments: ctx.fragments, commit: ctx.commit }), 'utf8');
+            const content = (0, render_1.renderReleaseNote)(config, { version: ctx.version, date: ctx.date, fragments: ctx.fragments, commit: ctx.commit });
+            node_fs_1.default.writeFileSync(releasePath, content, 'utf8');
             archiveConsumedFragments(config, ctx.version, ctx.fragments);
             (0, publish_1.updatePatchNotesIndex)(config, ctx.version);
-            return { releasePath };
+            return { releasePath, content, date: ctx.date };
         },
         hasVersion(config, version) {
             const { releasesDir } = (0, config_1.resolvePaths)(config);
@@ -276,7 +277,10 @@ function changelogTarget(options = {}) {
             node_fs_1.default.mkdirSync(node_path_1.default.dirname(changelogPath), { recursive: true });
             node_fs_1.default.writeFileSync(changelogPath, nextContent, 'utf8');
             archiveConsumedFragments(config, ctx.version, ctx.fragments);
-            return { releasePath: changelogPath };
+            // The artifact's `content` is just-this-release's section (never the
+            // whole, possibly-cumulative `changelogPath`), normalized to a single
+            // trailing newline like `patchNotesDirTarget`'s file content.
+            return { releasePath: changelogPath, content: `${section.replace(/\n+$/, '')}\n`, date: ctx.date };
         },
         hasVersion(config, version) {
             const rootDir = node_path_1.default.resolve(config.rootDir);

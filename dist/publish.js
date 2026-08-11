@@ -149,17 +149,30 @@ function updatePatchNotesIndex(config, version) {
     node_fs_1.default.mkdirSync(node_path_1.default.dirname(indexPath), { recursive: true });
     node_fs_1.default.writeFileSync(indexPath, (0, render_1.renderPatchNotesIndex)(config, listReleaseSummaries(config), version), 'utf8');
 }
-/** Build a deterministic, transport-neutral descriptor only after validation succeeds. */
+/**
+ * Build a deterministic, transport-neutral descriptor only after validation
+ * succeeds. `renderedNotes`/`date` come from `result` — which the notes
+ * target itself returned from `publish` — rather than re-reading and
+ * re-parsing `result.releasePath`: a target's on-disk file may be a whole
+ * cumulative document (e.g. `changelogTarget()`'s `CHANGELOG.md`) that a
+ * blind re-parse can't tell apart from the one release just cut (PKG-140
+ * finding 3). Likewise `product`/`repository` come from the configured
+ * `VersionManifestAdapter` (or generic fallbacks), never from reading
+ * `package.json` directly, so a consumer with a non-npm manifest adapter and
+ * no `package.json` at the root can still produce a valid artifact (PKG-140
+ * finding 4).
+ */
 function createReleaseArtifactV1(config, result, commit = '') {
     const validation = validateReleaseState(config, result.version);
     if (!validation.ok)
         throw new Error(`Release ${result.version} is not validated: ${validation.errors.join('; ')}`);
     const rootDir = node_path_1.default.resolve(config.rootDir);
-    const renderedNotes = node_fs_1.default.readFileSync(result.releasePath, 'utf8');
-    const manifest = JSON.parse(node_fs_1.default.readFileSync(node_path_1.default.join(rootDir, 'package.json'), 'utf8'));
-    const repository = typeof manifest.repository === 'string' ? manifest.repository : manifest.repository?.url ?? rootDir;
-    return Object.freeze({ schemaVersion: 1, product: manifest.name ?? node_path_1.default.basename(rootDir), repository, version: result.version,
-        commit: commit || getGitShortSha(rootDir), date: (0, render_1.parseReleaseSummary)(config, result.releasePath).date, renderedNotes,
+    const renderedNotes = result.content;
+    const metadata = config.manifest.readArtifactMetadata?.(rootDir) ?? {};
+    const product = metadata.product ?? config.productName;
+    const repository = metadata.repository ?? rootDir;
+    return Object.freeze({ schemaVersion: 1, product, repository, version: result.version,
+        commit: commit || getGitShortSha(rootDir), date: result.date, renderedNotes,
         notesDigest: (0, node_crypto_1.createHash)('sha256').update(renderedNotes).digest('hex'), artifactRef: node_path_1.default.relative(rootDir, result.releasePath), fragmentCount: result.fragmentCount });
 }
 /**
@@ -178,8 +191,8 @@ function publishReleaseWithFragments(config, options, fragmentsOverride) {
     if (fragments.length === 0 && !options.allowEmpty) {
         throw new Error('No unreleased patch-note fragments found. Use --allow-empty to publish an empty note.');
     }
-    const { releasePath } = resolveNotesTarget(config).publish(config, { version, date, commit: String(options.commit || ''), fragments }, { force: options.force });
-    return { version, releasePath, fragmentCount: fragments.length };
+    const published = resolveNotesTarget(config).publish(config, { version, date, commit: String(options.commit || ''), fragments }, { force: options.force });
+    return { version, releasePath: published.releasePath, fragmentCount: fragments.length, content: published.content, date: published.date };
 }
 function publishRelease(config, options = {}) {
     return publishReleaseWithFragments(config, options);
@@ -268,6 +281,8 @@ function cutRelease(config, options = {}) {
             version,
             fragmentCount: preflight.fragmentCount,
             releasePath: release.releasePath,
+            content: release.content,
+            date: release.date,
         };
     }
     catch (error) {
