@@ -1,9 +1,12 @@
 /**
  * Publish/validate flow — ported byte-for-byte from rouge's
- * `scripts/lib/release-notes-core.js`. STRICT PARITY for v0.1.0: this
- * replicates rouge's exact current write order (release file -> archive
- * copies -> delete unreleased -> refresh index) with NO transactional
- * rollback. That hardening is deferred to v0.1.1 (see the extraction plan).
+ * `scripts/lib/release-notes-core.js`. Happy-path write order (release file
+ * -> archive copies -> delete unreleased -> refresh index) matches rouge's
+ * original scripts exactly. `cutRelease` (bump -> publish -> validate) is
+ * transactional: it snapshots every file a cut can touch before the first
+ * write and rolls all of them back — manifest, notes-target output, and
+ * archived fragments restored to their original locations — if bump,
+ * publish, archive, or the final validation fails (PKG-140 finding 2).
  */
 
 import fs from 'node:fs';
@@ -16,10 +19,11 @@ import type { Fragment } from './fragments';
 import { collectFragments, todayIso } from './fragments';
 import type { ReleaseSummary } from './render';
 import { parseReleaseSummary, renderPatchNotesIndex } from './render';
-import type { ReleaseNotesTarget } from './notes-target';
+import type { ReleaseNotesPublishContext, ReleaseNotesTarget } from './notes-target';
 import { patchNotesDirTarget } from './notes-target';
 import type { BumpLevel } from './version';
 import { resolveBumpLevel } from './version';
+import { NOOP_GUARD, combineRestores, rollbackOnFailure, snapshotDirectory } from './fs-snapshot';
 
 export { collectFragments } from './fragments';
 
@@ -167,6 +171,10 @@ export interface PublishReleaseResult {
   version: string;
   releasePath: string;
   fragmentCount: number;
+  /** This release's rendered notes, as returned by the notes target's `publish` (PKG-140 finding 3). */
+  content: string;
+  /** This release's date, as returned by the notes target's `publish` — never re-derived by re-parsing `releasePath`. */
+  date: string;
 }
 
 export interface ReleaseArtifactV1 {
@@ -174,16 +182,29 @@ export interface ReleaseArtifactV1 {
   renderedNotes: string; notesDigest: string; artifactRef: string; fragmentCount: number;
 }
 
-/** Build a deterministic, transport-neutral descriptor only after validation succeeds. */
+/**
+ * Build a deterministic, transport-neutral descriptor only after validation
+ * succeeds. `renderedNotes`/`date` come from `result` — which the notes
+ * target itself returned from `publish` — rather than re-reading and
+ * re-parsing `result.releasePath`: a target's on-disk file may be a whole
+ * cumulative document (e.g. `changelogTarget()`'s `CHANGELOG.md`) that a
+ * blind re-parse can't tell apart from the one release just cut (PKG-140
+ * finding 3). Likewise `product`/`repository` come from the configured
+ * `VersionManifestAdapter` (or generic fallbacks), never from reading
+ * `package.json` directly, so a consumer with a non-npm manifest adapter and
+ * no `package.json` at the root can still produce a valid artifact (PKG-140
+ * finding 4).
+ */
 export function createReleaseArtifactV1(config: ReleaseKitConfig, result: PublishReleaseResult, commit = ''): ReleaseArtifactV1 {
   const validation = validateReleaseState(config, result.version);
   if (!validation.ok) throw new Error(`Release ${result.version} is not validated: ${validation.errors.join('; ')}`);
   const rootDir = path.resolve(config.rootDir);
-  const renderedNotes = fs.readFileSync(result.releasePath, 'utf8');
-  const manifest = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8')) as { name?: string; repository?: string | { url?: string } };
-  const repository = typeof manifest.repository === 'string' ? manifest.repository : manifest.repository?.url ?? rootDir;
-  return Object.freeze({ schemaVersion: 1, product: manifest.name ?? path.basename(rootDir), repository, version: result.version,
-    commit: commit || getGitShortSha(rootDir), date: parseReleaseSummary(config, result.releasePath).date, renderedNotes,
+  const renderedNotes = result.content;
+  const metadata = config.manifest.readArtifactMetadata?.(rootDir) ?? {};
+  const product = metadata.product ?? config.productName;
+  const repository = metadata.repository ?? rootDir;
+  return Object.freeze({ schemaVersion: 1, product, repository, version: result.version,
+    commit: commit || getGitShortSha(rootDir), date: result.date, renderedNotes,
     notesDigest: createHash('sha256').update(renderedNotes).digest('hex'), artifactRef: path.relative(rootDir, result.releasePath), fragmentCount: result.fragmentCount });
 }
 
@@ -207,12 +228,12 @@ function publishReleaseWithFragments(
   if (fragments.length === 0 && !options.allowEmpty) {
     throw new Error('No unreleased patch-note fragments found. Use --allow-empty to publish an empty note.');
   }
-  const { releasePath } = resolveNotesTarget(config).publish(
+  const published = resolveNotesTarget(config).publish(
     config,
     { version, date, commit: String(options.commit || ''), fragments },
     { force: options.force },
   );
-  return { version, releasePath, fragmentCount: fragments.length };
+  return { version, releasePath: published.releasePath, fragmentCount: fragments.length, content: published.content, date: published.date };
 }
 
 export function publishRelease(config: ReleaseKitConfig, options: PublishReleaseOptions = {}): PublishReleaseResult {
@@ -254,6 +275,10 @@ export interface CutReleaseResult {
   version: string;
   fragmentCount: number;
   releasePath: string;
+  /** This release's rendered notes, as returned by the notes target's `publish` (PKG-140 finding 3). */
+  content: string;
+  /** This release's date, as returned by the notes target's `publish`. */
+  date: string;
 }
 
 /**
@@ -284,9 +309,26 @@ function preflightCut(
 /**
  * Bumps the manifest to the next (or explicit) version, publishes fragments
  * into a versioned release file, and validates the result — rouge's exact
- * current order (bump -> publish -> validate), matching `cut-release.js`.
+ * write order (bump -> publish -> validate), matching `cut-release.js`.
  * Fragments are collected once here and threaded through preflight/publish,
  * so the set that chose the version is provably the set that gets published.
+ *
+ * TRANSACTIONAL (PKG-140 finding 2): `preflightCut` validates everything it
+ * can before any write. Everything a cut can still touch after that — the
+ * manifest (via `config.manifest.snapshot`), the two directories `archiveDir`/
+ * `unreleasedDir` may need creating (PKG-140 finding D), and the notes
+ * target's output plus the fragments it archives (via `notesTarget.snapshot`)
+ * — is snapshotted BEFORE the bump, so a failure in bump, publish, archive,
+ * or the final validation restores every one of those files to its exact
+ * pre-cut bytes, including moving archived fragments back to `unreleased/`
+ * and removing any directory the cut had to create along the way. Each
+ * guard's `commit()` is called right after the write phase it watches
+ * finishes successfully, so `restore()` can tell OUR OWN write apart from a
+ * legitimate concurrent edit landing afterwards and skip the latter instead
+ * of clobbering it (PKG-140 finding B) — see `Guard`'s doc comment in
+ * `fs-snapshot.ts`. A rollback failure is appended to (never replaces) the
+ * error that triggered it, and any skipped-due-to-conflict path is reported
+ * alongside it — see `rollbackOnFailure`.
  */
 export function cutRelease(config: ReleaseKitConfig, options: CutReleaseOptions = {}): CutReleaseResult {
   const previousVersion = resolveVersion(config);
@@ -299,26 +341,47 @@ export function cutRelease(config: ReleaseKitConfig, options: CutReleaseOptions 
     version = String(config.versionStrategy.next(previousVersion, { bump: level })).trim();
   }
   const preflight = preflightCut(config, version, options, fragments);
-  bumpVersion(config, { version });
-  const release = publishReleaseWithFragments(
-    config,
-    {
+
+  const rootDir = path.resolve(config.rootDir);
+  const notesTarget = resolveNotesTarget(config);
+  const date = options.date || todayIso();
+  const commit = String(options.commit || '');
+  const ctx: ReleaseNotesPublishContext = { version, date, commit, fragments };
+
+  const paths = resolvePaths(config);
+  const manifestGuard = config.manifest.snapshot?.(rootDir) ?? NOOP_GUARD;
+  const notesGuard = notesTarget.snapshot?.(config, ctx) ?? NOOP_GUARD;
+  // Registered in the order these are actually touched (manifest, then the
+  // two directories `publishReleaseWithFragments` may create, then the
+  // notes target's own writes); `combineRestores` undoes them in reverse —
+  // the notes target first, the two directories next (by which point
+  // anything they held has already been cleaned up, so an empty one can
+  // actually be removed), and the manifest last.
+  const restore = combineRestores([
+    manifestGuard.restore,
+    snapshotDirectory(paths.unreleasedDir),
+    snapshotDirectory(paths.archiveDir),
+    notesGuard.restore,
+  ]);
+
+  try {
+    bumpVersion(config, { version });
+    manifestGuard.commit();
+    const release = publishReleaseWithFragments(config, { version, date, commit, force: options.force, allowEmpty: options.allowEmpty }, fragments);
+    notesGuard.commit();
+    const validation = validateReleaseState(config, version);
+    if (!validation.ok) {
+      throw new Error(`Release ${version} was cut but failed validation:\n${validation.errors.join('\n')}`);
+    }
+    return {
+      previousVersion,
       version,
-      date: options.date,
-      commit: options.commit,
-      force: options.force,
-      allowEmpty: options.allowEmpty,
-    },
-    fragments,
-  );
-  const validation = validateReleaseState(config, version);
-  if (!validation.ok) {
-    throw new Error(`Release ${version} was cut but failed validation:\n${validation.errors.join('\n')}`);
+      fragmentCount: preflight.fragmentCount,
+      releasePath: release.releasePath,
+      content: release.content,
+      date: release.date,
+    };
+  } catch (error) {
+    return rollbackOnFailure(restore, error);
   }
-  return {
-    previousVersion,
-    version,
-    fragmentCount: preflight.fragmentCount,
-    releasePath: release.releasePath,
-  };
 }

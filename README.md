@@ -95,12 +95,50 @@ release-kit bump [--version 0.2.0-alpha.0]     # bump the manifest version
 release-kit publish [--force] [--allow-empty]  # publish fragments into a release file
 release-kit cut [--force] [--allow-empty]      # bump + publish + validate in one step
 release-kit check                              # validate the current release state
-release-kit hygiene [--base origin/main]       # fail if release-relevant changes lack a patch note
+release-kit hygiene [--base origin/main] [--allow-missing-history]  # fail if release-relevant changes lack a patch note
 ```
 
 Common flags: `--root <dir>`, `--version <v>`, `--date <YYYY-MM-DD>`,
-`--commit <sha>`, `--kind`/`--slug`/`--summary` (for `note`), `--base` (for
-`hygiene`), `--force`, `--allow-empty`, `--help`.
+`--commit <sha>`, `--kind`/`--slug`/`--summary` (for `note`), `--base` /
+`--allow-missing-history` (for `hygiene`), `--force`, `--allow-empty`,
+`--help`.
+
+## Release hygiene fails CLOSED on a git failure
+
+`hygiene` computes the changed-file set from git. If it can't — the `git`
+binary is missing, the directory isn't a git repository, the configured
+`baseRef` doesn't resolve, or there isn't enough history to compute a diff
+against it (the classic shallow-CI-checkout shape: most providers default to
+a shallow clone) — the gate throws instead of silently reporting "no changes
+detected". A gate that reports success when it couldn't run is worse than no
+gate; treating an empty diff as "no changes" would make broken git
+indistinguishable from a genuinely clean tree.
+
+Each failure throws a `HygieneGitError` with a `kind` and an actionable
+`message` naming the fix:
+
+| `kind` | Meaning | Fix |
+| --- | --- | --- |
+| `git-unavailable` | `git` isn't on PATH | Install git / add it to PATH |
+| `not-a-git-repo` | The directory has no `.git` history | Run from a real git checkout |
+| `base-ref-not-found` | `baseRef` doesn't resolve (bad name, or never fetched into this checkout) | Verify the ref, or fetch it — a shallow CI checkout usually fetches only the current branch |
+| `insufficient-history` | Both refs exist but share no common commit in this checkout | Fetch full history, e.g. `actions/checkout` with `fetch-depth: 0`, or `git fetch --unshallow` |
+| `git-command-failed` | A git invocation failed some other way — including `merge-base` being killed by a signal, timing out, or a corrupt repository | Investigate the underlying git failure directly; this is never a missing-history problem |
+
+**This is a behavior change**: a `release:hygiene` run that used to silently
+pass with an unreachable `baseRef` (checking nothing) now fails the build.
+The fix in almost every case is `fetch-depth: 0` (or fetching the base ref)
+in CI. If a consumer's CI genuinely cannot supply more history, set
+`hygiene.allowMissingHistory: true` in `release-kit.config.js` (or pass
+`--allow-missing-history`) — this is an **explicit, opt-in** escape hatch,
+never the default: it downgrades ONLY a `base-ref-not-found` or
+`insufficient-history` failure to a working-tree-only check and prints a loud
+warning naming the reduced coverage, rather than failing or passing silently.
+It does NOT rescue `git-unavailable`/`not-a-git-repo`/`git-command-failed` —
+the first two can't compute any diff at all, base-ref or otherwise, and the
+third means `merge-base` failed in some unrecognized way (a hung/killed/timed-out
+process, repo corruption, etc.) rather than cleanly rejecting the ref — never a
+missing-history problem, so it always fails closed regardless of this setting.
 
 ## Fragment format
 
@@ -137,11 +175,58 @@ docs/
 `archive/<version>/`, deletes them from `unreleased/`, refreshes the index,
 and validates the result.
 
-**v0.1.0 is a STRICT-PARITY port of the original rouge tooling**: the cut
-order (bump → publish → validate) has no transactional rollback — a
-mid-publish throw can leave the manifest bumped with fragments partially
-archived. Snapshot/rollback hardening is planned for a v0.1.1 release and
-will not change the happy-path output.
+The happy-path write order (bump → publish → validate) matches the original
+rouge tooling. `cutRelease` is **transactional**: it snapshots every file the
+cut can touch — the manifest and the notes target's output plus the
+fragments it archives — before the first write, and rolls all of them back,
+byte-for-byte, if bump, publish, archive, or the final validation fails.
+Archived fragments are moved back to their original `unreleased/` location on
+rollback, not merely copied. A rollback failure is appended to (never
+replaces) the error that triggered it, so a broken rollback can't hide the
+real problem. Both built-in `VersionManifestAdapter`/`ReleaseNotesTarget`
+implementations support this; a custom adapter/target that doesn't implement
+the optional `snapshot` method is skipped — the rest of the cut still rolls
+back, just not that piece.
+
+### `ReleaseArtifactV1`
+
+`publish --json` and `cut --json` (and the `createReleaseArtifactV1(config,
+result, commit?)` function) emit a deterministic, transport-neutral
+descriptor of the release just produced — built only after `validateReleaseState`
+confirms it, never before:
+
+```ts
+interface ReleaseArtifactV1 {
+  schemaVersion: 1;
+  product: string;
+  repository: string;
+  version: string;
+  commit: string;
+  date: string;
+  renderedNotes: string;
+  notesDigest: string; // sha256 of renderedNotes
+  artifactRef: string; // releasePath, relative to rootDir
+  fragmentCount: number;
+}
+```
+
+`renderedNotes`/`date` come from the notes target itself — `publish` returns
+`{ releasePath, content, date }`, and the artifact uses `content`/`date`
+verbatim rather than re-reading and re-parsing `releasePath`. This matters
+because a target's on-disk file isn't always scoped to one release:
+`changelogTarget()`'s `releasePath` is the whole, cumulative `CHANGELOG.md`,
+so `content` is specifically THIS version's section (never the full file),
+and `date` is the date `publish` actually rendered with (never derived from a
+`Release date:` line that a flat changelog section doesn't have). A custom
+`ReleaseNotesTarget` must return both fields for its artifacts to be valid.
+
+`product`/`repository` come from `config.manifest.readArtifactMetadata?.(rootDir)`
+— an optional method on `VersionManifestAdapter` — falling back to
+`config.productName`/`rootDir` when the adapter doesn't implement it or omits
+a field. `createReleaseArtifactV1` never reads a manifest file directly, so a
+consumer with a custom (non-npm) manifest adapter and no `package.json` at
+the root can still produce a valid artifact. `npmPackage()` implements
+`readArtifactMetadata` by reading `name`/`repository` off `package.json`.
 
 ## Notes targets
 
@@ -174,9 +259,15 @@ the `## <version>` heading is present. The new section is spliced in without
 rewriting unrelated parts of the file; `indexPath` is unused by this target.
 
 Both targets satisfy the same `ReleaseNotesTarget` interface (`publish`,
-`validate`, `hasVersion`), so the `bump → publish → validate` cut flow is
-identical regardless of output format. Write your own target to render release
-notes anywhere else.
+`validate`, `hasVersion`, and an optional `snapshot` for cut-rollback
+support), so the `bump → publish → validate` cut flow is identical regardless
+of output format. Write your own target to render release notes anywhere
+else; implement `snapshot` too if you want `cutRelease` to roll it back on
+failure. `publish` must return `{ releasePath, content, date }`: `content` is
+the rendered notes for the version just published — scoped to that release
+alone, even if `releasePath` is a file a target shares across versions — and
+`date` is the date it rendered with. `createReleaseArtifactV1` (see
+`ReleaseArtifactV1` above) uses those two fields verbatim.
 
 ## The config seam (`ReleaseKitConfig`)
 
@@ -215,13 +306,22 @@ interface VersionManifestAdapter {
   readVersion(rootDir: string): string;
   writeVersion(rootDir: string, version: string): void;
   validateVersionSync?(rootDir: string, version: string): string[];
+  snapshot?(rootDir: string): () => void;
+  readArtifactMetadata?(rootDir: string): { product?: string; repository?: string };
 }
 ```
 
 `npmPackage({ packageFileName?, lockFileName? })` reads/writes
 `package.json` (+ `package-lock.json` `packages[""].version` when present —
 OPTIONAL-lockfile mode: a missing lockfile is not an error, so non-npm
-consumers aren't blocked).
+consumers aren't blocked). It shape-validates a present lockfile BEFORE
+writing `package.json`, so a malformed lockfile fails before either file is
+touched, and it implements `snapshot` so `cutRelease` can roll a failed cut's
+manifest changes back byte-for-byte. It also implements
+`readArtifactMetadata` (`product`/`repository` from `package.json`'s `name`
+and `repository` fields) for `createReleaseArtifactV1`; a custom adapter that
+omits it (or a field of it) falls back to `config.productName`/`rootDir`
+instead of release-kit reading a manifest file on its own.
 
 ## Reusable API
 
@@ -236,6 +336,7 @@ import {
   resolveVersion, nextVersion, bumpVersion,
   publishRelease, validateReleaseState, cutRelease, listReleaseSummaries,
   classifyReleaseHygiene, checkReleaseHygiene, collectChangedFiles,
+  HygieneGitError,
   runCli,
 } from '@andrewpopov/release-kit';
 ```
@@ -301,24 +402,19 @@ transport-neutral AI request, an optional Anthropic transport, Discord webhook
 payload, and posting mechanics; consumers keep credentials, release URLs, and
 orchestration.
 
-## Known limitations & planned hardening (v0.1.x)
+## Known limitations & planned hardening
 
-v0.1.0 is a deliberately **strict-parity** extraction — it reproduces the
-original tooling's behavior exactly (proven by a byte-diff golden test
-against rouge's real, unmodified scripts), including a few rough edges that
-are faithfully preserved rather than "fixed" mid-extraction. These are
-slated for a hardening pass that will not change happy-path output:
+v0.1.0 started as a deliberately **strict-parity** extraction — it
+reproduced the original rouge tooling's behavior exactly (proven by a
+byte-diff golden test against rouge's real, unmodified scripts), including a
+few rough edges that were faithfully preserved rather than "fixed"
+mid-extraction. `cutRelease`'s transactional rollback and hygiene's
+fail-closed git handling (both documented above) have since closed the two
+biggest of those. What remains:
 
-- **Non-transactional cut** — a mid-publish failure can leave a half-bumped
-  state (inherited). → snapshot/rollback.
-- **`bump --version <v>` does not validate** the explicit version against the
-  strategy (inherited), so an out-of-scheme value can be written. → assert.
 - **Optional-lockfile mode can mask a typo'd `lockFileName`** — a configured
   lockfile path that doesn't exist is silently skipped. → a `requireLockfile`
   option.
-- **Hygiene swallows git/base-ref failures** (inherited): an unreachable
-  `baseRef` (e.g. a shallow CI checkout) yields an empty changed-file set and
-  can pass falsely. → surface base-ref resolution errors.
 - **Release-note metadata labels are format-fixed** (`Release date:`,
   `Stage:`, `Package version:`, and the `# {productName} Patch Notes` index
   heading). Configurable when a consumer needs different wording.

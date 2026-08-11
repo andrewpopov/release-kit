@@ -8,7 +8,7 @@ export { alphaSemver, stableSemver, ALPHA_VERSION_RE, STABLE_VERSION_RE, resolve
 export type { VersionStrategy, AlphaSemverOptions, StableSemverOptions, BumpLevel, VersionBumpContext } from './version';
 
 export { npmPackage } from './manifest';
-export type { VersionManifestAdapter, NpmPackageOptions } from './manifest';
+export type { VersionManifestAdapter, NpmPackageOptions, ArtifactMetadata } from './manifest';
 
 export {
   parseFrontMatter,
@@ -88,8 +88,9 @@ export {
   checkReleaseHygiene,
   isPatchNoteArtifact,
   isReleaseRelevantFile,
+  HygieneGitError,
 } from './hygiene';
-export type { HygieneResult, CheckReleaseHygieneOptions } from './hygiene';
+export type { HygieneResult, CheckReleaseHygieneOptions, HygieneGitFailureKind } from './hygiene';
 
 export { run as runCli, parseArgs as parseCliArgs } from './cli';
 export type { CliRunOptions } from './cli';

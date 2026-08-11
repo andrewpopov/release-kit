@@ -7,7 +7,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ReleaseKitConfig } from './config';
-import { checkReleaseHygiene } from './hygiene';
+import { checkReleaseHygiene, HygieneGitError } from './hygiene';
+import type { HygieneResult } from './hygiene';
 import { collectFragments, todayIso, writeNewFragment } from './fragments';
 import { formatPackedBinFailures, verifyBinModesInGit, verifyPackedBins } from './packed-bins';
 import { renderReleaseNote } from './render';
@@ -34,6 +35,7 @@ interface ParsedArgs {
   tarball: string;
   force: boolean;
   allowEmpty: boolean;
+  allowMissingHistory: boolean;
   help: boolean;
   json: boolean;
 }
@@ -67,6 +69,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     tarball: '',
     force: false,
     allowEmpty: false,
+    allowMissingHistory: false,
     help: false,
     json: false,
   };
@@ -84,6 +87,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
       parsed.force = true;
     } else if (arg === '--allow-empty') {
       parsed.allowEmpty = true;
+    } else if (arg === '--allow-missing-history') {
+      parsed.allowMissingHistory = true;
     } else if (arg === '--json') {
       parsed.json = true;
     } else if (!parsed.verb && !arg.startsWith('-')) {
@@ -122,7 +127,7 @@ function writeHelp(stream: NodeJS.WritableStream): void {
       '  publish [--version <v>] [--force] [--allow-empty]  Publish fragments into a release file',
       '  cut [--version <v>] [--force] [--allow-empty]      Bump, publish, and validate in one step',
       '  check [--version <v>]                              Validate the current release state',
-      '  hygiene [--base <ref>]                             Check release-relevant changes have a patch note',
+      '  hygiene [--base <ref>] [--allow-missing-history]   Check release-relevant changes have a patch note',
       '  verify-bins [--tarball <path>]                     Assert every package.json#bin is executable in the packed tarball',
       '',
       'Options:',
@@ -137,6 +142,8 @@ function writeHelp(stream: NodeJS.WritableStream): void {
       '  --tarball <path>   Pre-packed tarball to check (for `verify-bins`)',
       '  --force            Overwrite an existing release file',
       '  --allow-empty      Allow publishing/cutting with no fragments',
+      '  --allow-missing-history  Explicit opt-out: downgrade an unresolvable base ref to a',
+      '                     working-tree-only hygiene check instead of failing (for `hygiene`)',
       '  --json             Emit validated ReleaseArtifactV1 for publish/cut',
       '  --help, -h          Show this help',
       '',
@@ -250,7 +257,28 @@ export function run(
       return 0;
     }
     case 'hygiene': {
-      const result = checkReleaseHygiene(config, { baseRef: parsed.base || config.hygiene.baseRef });
+      let result: HygieneResult;
+      try {
+        result = checkReleaseHygiene(config, {
+          baseRef: parsed.base || config.hygiene.baseRef,
+          allowMissingHistory: parsed.allowMissingHistory || config.hygiene.allowMissingHistory,
+        });
+      } catch (error) {
+        // FAIL CLOSED: a git failure (missing binary, not a repo, an
+        // unresolvable base ref, insufficient history) must exit non-zero,
+        // never fall through to "no changes detected". `HygieneGitError`'s
+        // message already names the failure and the fix; print it in the
+        // same `release:hygiene:` style as every other hygiene failure below
+        // rather than letting it bubble to the generic top-level handler.
+        if (error instanceof HygieneGitError) {
+          stderr.write(`release:hygiene: ${error.message}\n`);
+          return 1;
+        }
+        throw error;
+      }
+      for (const warning of result.warnings) {
+        stderr.write(`release:hygiene: WARNING: ${warning}\n`);
+      }
       if (result.ok) {
         if (result.relevantFiles.length === 0) {
           stdout.write('release:hygiene: ok - no release-relevant changes detected.\n');

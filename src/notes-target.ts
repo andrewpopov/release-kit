@@ -14,6 +14,8 @@ import { releaseLinkPath, resolvePaths } from './config';
 import type { Fragment } from './fragments';
 import { parseReleaseSummary, renderReleaseNote } from './render';
 import { listReleaseSummaries, tryStep, updatePatchNotesIndex } from './publish';
+import { combineRestores, describeError, snapshotDirectory, snapshotFile } from './fs-snapshot';
+import type { Guard } from './fs-snapshot';
 
 export interface ReleaseNotesPublishContext {
   version: string;
@@ -23,16 +25,45 @@ export interface ReleaseNotesPublishContext {
 }
 
 export interface ReleaseNotesTarget {
-  /** Write the version's notes into the target and consume its fragments. Returns the written file path. */
+  /**
+   * Write the version's notes into the target and consume its fragments.
+   * Returns the written file path AND the immutable artifact content for
+   * THIS release: `content` is the rendered notes for `ctx.version` alone
+   * (never the whole file a target may share across versions, e.g.
+   * `changelogTarget`'s cumulative `CHANGELOG.md`), and `date` is the date
+   * the target actually rendered with (`ctx.date`), not something a caller
+   * has to re-derive by re-parsing the written file. `createReleaseArtifactV1`
+   * uses these directly instead of re-parsing `releasePath` — re-parsing is
+   * what let a target-specific file shape (no `Release date:` line, notes for
+   * every historical version) leak into the "one release" artifact (PKG-140
+   * finding 3).
+   */
   publish(
     config: ReleaseKitConfig,
     ctx: ReleaseNotesPublishContext,
     options: { force?: boolean },
-  ): { releasePath: string };
+  ): { releasePath: string; content: string; date: string };
   /** Return validation error strings for the target's state at `version` (empty array = ok). */
   validate(config: ReleaseKitConfig, version: string): string[];
   /** Returns whether `version`'s notes already exist in the target (checked pre-mutation by `preflightCut`). */
   hasVersion(config: ReleaseKitConfig, version: string): boolean;
+  /**
+   * Optional rollback support, mirroring `VersionManifestAdapter.snapshot`.
+   * Snapshots every file `publish(config, ctx, ...)` would touch for this
+   * `ctx` (the output file/index AND the fragment files `ctx.fragments`
+   * names, which `publish` moves from `unreleased/` into `archive/<version>/`)
+   * and returns a `Guard`. `cutRelease` calls this BEFORE `publish`, calls
+   * the guard's `commit()` right after `publish` returns successfully, and
+   * invokes `restore()` if a LATER step (validation) fails — restoring
+   * every touched file byte-for-byte, including putting moved fragments
+   * back at their original location, EXCEPT a file whose current contents
+   * no longer match what `commit()` observed: that one is left alone and
+   * reported instead of clobbered, since something else must have legitimately
+   * changed it since (PKG-140 finding B). Both built-in targets implement
+   * it; a custom target that doesn't is skipped by `cutRelease` — best
+   * effort, not required.
+   */
+  snapshot?(config: ReleaseKitConfig, ctx: ReleaseNotesPublishContext): Guard;
 }
 
 /** Archives consumed fragments to `archiveDir/<version>/` and deletes them from `unreleased/`. Shared by both targets. */
@@ -47,6 +78,84 @@ function archiveConsumedFragments(config: ReleaseKitConfig, version: string, fra
     fs.copyFileSync(fragment.filePath, path.join(archiveVersionDir, fragment.fileName));
     fs.rmSync(fragment.filePath);
   }
+}
+
+/**
+ * Snapshots what `archiveConsumedFragments` is about to do for `fragments`:
+ * each fragment's ORIGINAL location under `unreleased/` (so a rollback moves
+ * it back, not just re-creates a copy) and its future archive-copy
+ * destination (so a rollback removes a partially-written copy rather than
+ * leaving it behind). Also removes the `archiveDir/<version>/` directory on
+ * rollback via `snapshotDirectory` if this snapshot is the one that would
+ * have created it and it ends up empty (PKG-140 finding D).
+ *
+ * ORDERING IS SAFETY-CRITICAL HERE (PKG-140 finding A): archiving a fragment
+ * is a MOVE, so at any moment its only surviving copy is either the
+ * unreleased/ source OR the archive copy, never both and — if we get this
+ * wrong — potentially NEITHER. On rollback we therefore always restore a
+ * fragment's SOURCE file first, and only delete its archive copy once that
+ * source restore has PROVABLY succeeded; if the source restore fails
+ * (disk full, permissions, I/O error) or has to be skipped (finding B — a
+ * concurrent write), the archive copy is deliberately left in place, so the
+ * fragment survives SOMEWHERE. This is spelled out as an explicit
+ * step-by-step loop below, top to bottom, rather than handed to
+ * `combineRestores` (whose reverse-of-given-order semantics is exactly what
+ * caused this bug the first time: the source restore was registered before
+ * the archive-copy restore, so it ran AFTER it) — do not "simplify" this
+ * back into a `combineRestores` call.
+ */
+function snapshotArchivedFragments(archiveVersionDir: string, fragments: Fragment[]): Guard {
+  if (fragments.length === 0) {
+    return { commit() {}, restore: () => [] };
+  }
+  const restoreDir = snapshotDirectory(archiveVersionDir);
+  const perFragment = fragments.map((fragment) => ({
+    fileName: fragment.fileName,
+    source: snapshotFile(fragment.filePath),
+    archiveCopy: snapshotFile(path.join(archiveVersionDir, fragment.fileName)),
+  }));
+  return {
+    commit() {
+      for (const { source, archiveCopy } of perFragment) {
+        source.commit();
+        archiveCopy.commit();
+      }
+    },
+    restore() {
+      const errors: unknown[] = [];
+      const skipped: string[] = [];
+      for (const { fileName, source, archiveCopy } of perFragment) {
+        let sourceRestored = false;
+        try {
+          const sourceSkips = source.restore();
+          skipped.push(...sourceSkips);
+          sourceRestored = sourceSkips.length === 0;
+        } catch (error) {
+          errors.push(error);
+        }
+        // Only remove the archive copy once the source is CONFIRMED back in
+        // place — see the doc comment above for why this order is
+        // load-bearing, not incidental.
+        if (sourceRestored) {
+          try {
+            skipped.push(...archiveCopy.restore());
+          } catch (error) {
+            errors.push(error);
+          }
+        } else {
+          skipped.push(
+            `${fileName}: archive copy left in place — its unreleased/ copy could not be safely restored (see above), ` +
+              'so removing the archive copy would leave the fragment in neither location.',
+          );
+        }
+      }
+      skipped.push(...restoreDir());
+      if (errors.length > 0) {
+        throw new Error(`Rollback failed for ${errors.length} fragment(s): ${errors.map(describeError).join('; ')}`);
+      }
+      return skipped;
+    },
+  };
 }
 
 function validateReleaseFile(
@@ -90,19 +199,44 @@ export function patchNotesDirTarget(): ReleaseNotesTarget {
       if (fs.existsSync(releasePath) && !options.force) {
         throw new Error(`${path.relative(paths.rootDir, releasePath)} already exists. Re-run with --force to overwrite it.`);
       }
-      fs.writeFileSync(
-        releasePath,
-        renderReleaseNote(config, { version: ctx.version, date: ctx.date, fragments: ctx.fragments, commit: ctx.commit }),
-        'utf8',
-      );
+      const content = renderReleaseNote(config, { version: ctx.version, date: ctx.date, fragments: ctx.fragments, commit: ctx.commit });
+      fs.writeFileSync(releasePath, content, 'utf8');
       archiveConsumedFragments(config, ctx.version, ctx.fragments);
       updatePatchNotesIndex(config, ctx.version);
-      return { releasePath };
+      return { releasePath, content, date: ctx.date };
     },
 
     hasVersion(config, version) {
       const { releasesDir } = resolvePaths(config);
       return fs.existsSync(path.join(releasesDir, config.versionStrategy.releaseFileName(version)));
+    },
+
+    snapshot(config, ctx) {
+      const paths = resolvePaths(config);
+      const releasePath = path.join(paths.releasesDir, config.versionStrategy.releaseFileName(ctx.version));
+      const archiveVersionDir = path.join(paths.archiveDir, ctx.version);
+      const releaseFileGuard = snapshotFile(releasePath);
+      const fragmentsGuard = snapshotArchivedFragments(archiveVersionDir, ctx.fragments);
+      const indexFileGuard = snapshotFile(paths.indexPath);
+      return {
+        commit() {
+          releaseFileGuard.commit();
+          fragmentsGuard.commit();
+          indexFileGuard.commit();
+        },
+        // Registered in the SAME order `publish()` writes them
+        // (releasesDir -> release file -> archived fragments -> index dir ->
+        // index file); `combineRestores` undoes them in reverse, i.e. the
+        // index file first and the releasesDir directory last — matching
+        // `publish()`'s write order run backwards.
+        restore: combineRestores([
+          snapshotDirectory(paths.releasesDir),
+          releaseFileGuard.restore,
+          fragmentsGuard.restore,
+          snapshotDirectory(path.dirname(paths.indexPath)),
+          indexFileGuard.restore,
+        ]),
+      };
     },
 
     validate(config, version) {
@@ -282,7 +416,10 @@ export function changelogTarget(options: ChangelogTargetOptions = {}): ReleaseNo
       fs.mkdirSync(path.dirname(changelogPath), { recursive: true });
       fs.writeFileSync(changelogPath, nextContent, 'utf8');
       archiveConsumedFragments(config, ctx.version, ctx.fragments);
-      return { releasePath: changelogPath };
+      // The artifact's `content` is just-this-release's section (never the
+      // whole, possibly-cumulative `changelogPath`), normalized to a single
+      // trailing newline like `patchNotesDirTarget`'s file content.
+      return { releasePath: changelogPath, content: `${section.replace(/\n+$/, '')}\n`, date: ctx.date };
     },
 
     hasVersion(config, version) {
@@ -293,6 +430,24 @@ export function changelogTarget(options: ChangelogTargetOptions = {}): ReleaseNo
       }
       const source = fs.readFileSync(changelogPath, 'utf8');
       return versionHeadingRegex(version).test(source);
+    },
+
+    snapshot(config, ctx) {
+      const rootDir = path.resolve(config.rootDir);
+      const changelogPath = path.join(rootDir, changelogRelPath);
+      const archiveVersionDir = path.join(resolvePaths(config).archiveDir, ctx.version);
+      const changelogGuard = snapshotFile(changelogPath);
+      const fragmentsGuard = snapshotArchivedFragments(archiveVersionDir, ctx.fragments);
+      return {
+        commit() {
+          changelogGuard.commit();
+          fragmentsGuard.commit();
+        },
+        // Registered in `publish()`'s write order (changelog directory ->
+        // changelog file -> archived fragments); reversed on restore, same
+        // reasoning as `patchNotesDirTarget`'s `snapshot` above.
+        restore: combineRestores([snapshotDirectory(path.dirname(changelogPath)), changelogGuard.restore, fragmentsGuard.restore]),
+      };
     },
 
     validate(config, version) {

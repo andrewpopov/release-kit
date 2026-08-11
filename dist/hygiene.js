@@ -9,7 +9,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DEFAULT_HYGIENE_EXCLUDE_PATTERNS = void 0;
+exports.DEFAULT_HYGIENE_EXCLUDE_PATTERNS = exports.HygieneGitError = void 0;
 exports.collectChangedFiles = collectChangedFiles;
 exports.isPatchNoteArtifact = isPatchNoteArtifact;
 exports.matchesHygieneExcludePattern = matchesHygieneExcludePattern;
@@ -30,31 +30,142 @@ function normalizePath(filePath) {
 function uniqueSorted(values) {
     return [...new Set(values.map(normalizePath).filter(Boolean))].sort((left, right) => left.localeCompare(right));
 }
-function gitLines(rootDir, args) {
+class HygieneGitError extends Error {
+    constructor(kind, message) {
+        super(message);
+        this.name = 'HygieneGitError';
+        this.kind = kind;
+    }
+}
+exports.HygieneGitError = HygieneGitError;
+/** Classifies a failed `execFileSync('git', args, ...)` call for `runGit`'s callers (i.e. every git invocation except `merge-base`, which needs its own ref-aware classification — see `resolveDiffBase`). */
+function classifyGitFailure(error, args) {
+    const err = error;
+    const command = `git ${args.join(' ')}`;
+    if (err && err.code === 'ENOENT') {
+        return new HygieneGitError('git-unavailable', `Release hygiene could not run \`${command}\`: the \`git\` executable was not found on PATH. Install git ` +
+            '(or make sure it is on PATH) in whatever environment runs `release-kit hygiene` — the gate cannot check ' +
+            'anything without it.');
+    }
+    const stderr = String(err?.stderr || '').trim();
+    if (/not a git repository/i.test(stderr)) {
+        return new HygieneGitError('not-a-git-repo', `Release hygiene could not run \`${command}\`: this directory is not inside a git repository (or its .git ` +
+            'history was not included in the checkout). Run `release-kit hygiene` from within a git checkout of the repo.');
+    }
+    return new HygieneGitError('git-command-failed', `Release hygiene could not run \`${command}\`: ${stderr || err?.message || 'the git command failed for an unknown reason'}`);
+}
+function runGit(rootDir, args) {
     try {
-        const output = (0, node_child_process_1.execFileSync)('git', args, {
+        return (0, node_child_process_1.execFileSync)('git', args, {
+            cwd: rootDir,
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+            timeout: 10000,
+        });
+    }
+    catch (error) {
+        throw classifyGitFailure(error, args);
+    }
+}
+function gitLines(rootDir, args) {
+    return runGit(rootDir, args)
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+}
+/** Best-effort hint only for the `insufficient-history` message — never lets a failure here mask the primary git error. */
+function isShallowRepo(rootDir) {
+    try {
+        return ((0, node_child_process_1.execFileSync)('git', ['rev-parse', '--is-shallow-repository'], {
             cwd: rootDir,
             encoding: 'utf8',
             stdio: ['ignore', 'pipe', 'ignore'],
             timeout: 10000,
-        });
-        return output
-            .split(/\r?\n/)
-            .map((line) => line.trim())
-            .filter(Boolean);
+        }).trim() === 'true');
     }
     catch {
-        return [];
+        return false;
     }
 }
+/**
+ * Resolves the merge-base commit `HEAD` diffs against, or `''` when `baseRef`
+ * isn't configured (an explicit, existing opt-out — see `HygieneConfig.baseRef`'s
+ * doc comment). A CONFIGURED ref that can't be resolved always throws: `git
+ * merge-base`'s own exit-code contract distinguishes the two failure shapes
+ * cleanly (per `git help merge-base`: status 1 means "no common ancestor
+ * found", anything else is a hard error), so `status === 1` maps to
+ * `insufficient-history` (the classic shallow-checkout shape: both refs exist
+ * but share no history in THIS checkout) and a NORMAL (non-signal) non-1 exit
+ * status maps to `base-ref-not-found` (bad ref name, or a ref never fetched
+ * into this checkout — the two are not reliably distinguishable from git's
+ * error text alone, so the message names both possible causes).
+ *
+ * A failure that DOESN'T fit either shape — `git merge-base` killed by a
+ * signal (including a timeout: `execFileSync`'s own timeout kills the child
+ * with SIGTERM, reported as a null `status` and a `signal`), or any other
+ * error with no normal exit status at all — is classified `git-command-failed`
+ * instead (PKG-140 finding C). This is NOT a cosmetic distinction:
+ * `checkReleaseHygiene`'s `allowMissingHistory` opt-out rescues ONLY
+ * `base-ref-not-found`/`insufficient-history`, so misclassifying a hung or
+ * killed git process (or repo corruption, or any other hard failure) as
+ * `base-ref-not-found` would let that opt-out silently rescue failures it was
+ * never meant to cover — an unrecognized failure must fail closed regardless
+ * of `allowMissingHistory`, which is the whole point of that flag being
+ * narrow.
+ */
 function resolveDiffBase(rootDir, baseRef) {
     const ref = String(baseRef || '').trim();
     if (!ref) {
         return '';
     }
-    const mergeBase = gitLines(rootDir, ['merge-base', 'HEAD', ref]);
-    return mergeBase[0] || '';
+    const args = ['merge-base', 'HEAD', ref];
+    try {
+        const output = (0, node_child_process_1.execFileSync)('git', args, {
+            cwd: rootDir,
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+            timeout: 10000,
+        });
+        return (output
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter(Boolean)[0] || '');
+    }
+    catch (error) {
+        const err = error;
+        if (err && (err.code === 'ENOENT' || /not a git repository/i.test(String(err.stderr || '')))) {
+            throw classifyGitFailure(error, args);
+        }
+        if (err && err.status === 1) {
+            const shallow = isShallowRepo(rootDir);
+            throw new HygieneGitError('insufficient-history', `Release hygiene could not find a common ancestor between HEAD and base ref "${ref}" — ${shallow
+                ? 'this checkout is shallow, so the history needed to compute the diff is missing.'
+                : 'the two histories share no common commit reachable from this checkout.'} Fetch full history before running hygiene (e.g. \`actions/checkout\` with \`fetch-depth: 0\`, or \`git fetch --unshallow\`), or confirm "${ref}" is the right base ref.`);
+        }
+        // See the doc comment above: only a NORMAL exit status (git ran to
+        // completion and rejected the ref) is the bad-ref/never-fetched shape
+        // `base-ref-not-found` names below. Anything else — killed by a signal,
+        // timed out, or no exit status at all — did not run to completion for
+        // some OTHER reason, so it must never be lumped in with (and therefore
+        // rescuable as) a missing-history problem.
+        if (!err || typeof err.status !== 'number' || err.signal) {
+            const stderr = String(err?.stderr || '').trim();
+            throw new HygieneGitError('git-command-failed', `Release hygiene could not run \`git ${args.join(' ')}\`: ${stderr || err?.message || 'the process did not run to completion for an unrecognized reason'}. This is NOT a missing-history failure (a bad ref name or shallow checkout) — hygiene.allowMissingHistory ` +
+                'does not cover it, so it fails closed regardless of that setting. Investigate the underlying git failure directly.');
+        }
+        const stderr = String(err?.stderr || '').trim();
+        throw new HygieneGitError('base-ref-not-found', `Release hygiene could not resolve base ref "${ref}": ${stderr || err?.message || 'git merge-base failed'}. ` +
+            `Verify the ref name, and that it has been fetched into this checkout — a shallow CI checkout (the default ` +
+            `on most providers) usually fetches only the current branch. Fetch the base ref too, or use \`fetch-depth: 0\`.`);
+    }
 }
+/**
+ * Collects the changed-file set hygiene classifies against. FAILS CLOSED:
+ * any git failure (missing binary, not a repo, an unresolvable base ref,
+ * insufficient history) throws a `HygieneGitError` instead of degrading to
+ * an empty (falsely-passing) result — see `checkReleaseHygiene` for the one
+ * explicit, opt-in way to downgrade a base-ref failure instead of failing.
+ */
 function collectChangedFiles(rootDir, baseRef) {
     const files = [];
     const diffBase = resolveDiffBase(rootDir, baseRef);
@@ -205,10 +316,30 @@ function classifyReleaseHygiene(config, changedFiles) {
         requiresPatchNote,
         placeholderPatchNoteFiles,
         trailingPeriodSummaryPatchNoteFiles,
+        warnings: [],
     };
 }
 function checkReleaseHygiene(config, options = {}) {
     const rootDir = node_path_1.default.resolve(config.rootDir);
     const baseRef = options.baseRef || config.hygiene.baseRef;
-    return classifyReleaseHygiene(config, collectChangedFiles(rootDir, baseRef));
+    const allowMissingHistory = options.allowMissingHistory || config.hygiene.allowMissingHistory || false;
+    const warnings = [];
+    let changedFiles;
+    try {
+        changedFiles = collectChangedFiles(rootDir, baseRef);
+    }
+    catch (error) {
+        if (allowMissingHistory &&
+            error instanceof HygieneGitError &&
+            (error.kind === 'base-ref-not-found' || error.kind === 'insufficient-history')) {
+            warnings.push(`hygiene.allowMissingHistory is set: continuing WITHOUT a base-ref comparison against "${baseRef}" (${error.message}). ` +
+                'Only working-tree, staged, and untracked changes are checked — commits already on this branch relative to ' +
+                'the base ref are NOT covered by this run. Fix the underlying history problem when you can.');
+            changedFiles = collectChangedFiles(rootDir, '');
+        }
+        else {
+            throw error;
+        }
+    }
+    return { ...classifyReleaseHygiene(config, changedFiles), warnings };
 }
