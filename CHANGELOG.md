@@ -17,6 +17,54 @@ CHANGELOG entry.
 
 ---
 
+## 0.6.0
+
+- ReleaseArtifactV1's renderedNotes/date are now scoped to the released version, not the whole notes target
+  `createReleaseArtifactV1` used to build `renderedNotes`/`date` by re-reading
+  and re-parsing `result.releasePath` after publish already wrote it. For
+  `patchNotesDirTarget()` (the default) that file happens to be one version's
+  own note, so this worked by luck; for `changelogTarget()` — every consumer in
+  the fleet — `releasePath` is the entire, cumulative `CHANGELOG.md`, so the
+  "validated descriptor for one release" actually carried every historical
+  release ever written plus an empty `date` (a changelog section has no
+  `Release date:` line for the regex to match). `ReleaseNotesTarget.publish()`
+  now returns the `content`/`date` it just wrote for that release, and
+  `createReleaseArtifactV1` uses those directly instead of re-parsing.
+  **`ReleaseNotesTarget.publish()`'s return type gained two required fields
+  (`content`, `date`)** — a custom notes target must now return them too, or
+  `createReleaseArtifactV1` will build an artifact with an `undefined`
+  `renderedNotes`/`date` (and throw building its digest). Both built-in targets
+  (`patchNotesDirTarget`, `changelogTarget`) implement this.
+  `PublishReleaseResult`/`CutReleaseResult` also gained the same two fields,
+  which is additive for existing callers reading known fields off the result.
+  Any `changelogTarget()` consumer of `--json`/`createReleaseArtifactV1` output
+  will see `renderedNotes` shrink from the whole changelog to just the new
+  version's section, and `date` go from always-empty to correct — that is the
+  fix, not a regression, but it is a value-shape change worth checking any
+  downstream JSON consumer against.
+- hygiene now fails closed instead of silently passing when git or the base ref is unavailable
+  `release-kit hygiene` used to swallow every git failure and treat it as "no changed files," so an invalid or unreachable `baseRef` — including the shallow checkout that most CI providers use by default — made the gate report success having checked nothing. It now throws a `HygieneGitError` (exported, with a `kind`: `git-unavailable`, `not-a-git-repo`, `base-ref-not-found`, or `insufficient-history`) whenever it can't reliably compute the changed-file set, and the CLI exits non-zero instead of printing "ok". **This will newly fail any `release:hygiene` run whose CI checkout can't resolve `hygiene.baseRef`** — most commonly a shallow clone that never fetched the base branch. Fix it by fetching full history (`actions/checkout` with `fetch-depth: 0`, or `git fetch --unshallow`/fetch the base ref explicitly); each thrown error names the fix for its specific failure. If your CI genuinely cannot supply more history, set `hygiene.allowMissingHistory: true` in `release-kit.config.js` (or pass `--allow-missing-history`) to explicitly downgrade to a working-tree-only check with a loud warning instead of failing — this is opt-in only, never the default.
+- announceReleaseToDiscord gains announce-once semantics
+  `announceReleaseToDiscord` now posts a given version at most once by default, tracked in a small on-disk ledger, so wiring it into deploy-kit's `deliveryEvent` hook (which fires once per deploy, not once per release) no longer re-posts the same announcement on every redeploy. New options: `announceOnce` (default `true`), `force` to post anyway, and `stateFile` to pin the ledger location. The ledger path otherwise resolves via `RELEASE_ANNOUNCE_STATE`, the new `config.paths.announcementStateFile`, `DEPLOY_KIT_SHARED_DIR`, a sibling `shared/` directory, or a non-durable fallback inside `rootDir`. The result type is now a discriminated union on `skipped`, and the new `resolveAnnouncementStatePath`/`readAnnouncedVersions`/`hasAnnouncedVersion`/`recordAnnouncedVersion` primitives are exported directly.
+- artifact generation no longer reads package.json directly, so a custom manifest adapter works without one
+  `createReleaseArtifactV1` unconditionally read `package.json` off `rootDir`
+  for `product`/`repository`, even though `ReleaseKitConfig.manifest`
+  (`VersionManifestAdapter`) is the seam every other release operation already
+  goes through. A consumer with a custom, non-npm manifest adapter and no
+  `package.json` at the root could cut and validate a release but crashed
+  (`ENOENT`) trying to produce its `--json` artifact. `VersionManifestAdapter`
+  gained an optional `readArtifactMetadata(rootDir)` method returning
+  `{ product?, repository? }`; `createReleaseArtifactV1` calls it instead of
+  reading `package.json`, falling back to `config.productName`/`rootDir` when
+  the adapter doesn't implement it or omits a field. `npmPackage()` implements
+  it with the exact same `name`/`repository` derivation
+  `createReleaseArtifactV1` used to inline, so its behavior for existing npm
+  consumers is unchanged.
+- a failed release cut now rolls back cleanly instead of leaving the working tree half-mutated
+  `cutRelease` bumped the manifest, published the release note, and archived consumed fragments before validating the result — so a validation failure (or a malformed lockfile discovered mid-write) left package.json/package-lock.json bumped, the notes target partially written, and fragments possibly moved into `archive/<version>/`, with no way back short of a manual git reset mid-release. `cutRelease` now snapshots every file a cut can touch (the manifest, via a new optional `VersionManifestAdapter.snapshot`, and the notes target's output plus its archived fragments, via a new optional `ReleaseNotesTarget.snapshot`) before the first write, and restores all of them byte-for-byte — including moving archived fragments back to `unreleased/` — if bump, publish, archive, or the final validation fails. `npmPackage()`'s manifest adapter also now validates a present lockfile's shape before writing `package.json`, so a malformed lockfile is caught before either file is touched. A rollback failure is appended to, and never masks, the original error. Both built-in adapters/targets implement the new `snapshot` hook (which now returns a `Guard: { commit(): void; restore(): string[] }` rather than a bare restore callback); a custom one that doesn't is simply skipped, so the rest of a cut still rolls back.
+  
+  The rollback itself is now safe to run, not just present: restoring a fragment always recreates its `unreleased/` copy BEFORE deleting the archived copy, so a failed or skipped source restore leaves the fragment in the archive rather than in neither location. Restoring a file also only overwrites it if the file's current bytes still match what release-kit itself last wrote there — a legitimate concurrent edit (another process, or a person, touching the same path after the cut wrote it but before rollback ran) is left alone and reported by name instead of being silently clobbered. And rollback now removes any directory the cut had to create along the way (e.g. a first-ever `archive/`), once it's empty, instead of leaving empty residue behind.
+
 ## 0.5.0
 
 - hygiene no longer requires a patch note for a test-only change
