@@ -388,6 +388,94 @@ is marked as untrusted in the model prompt, and webhook URLs must be HTTPS
 Discord webhook endpoints. Keep the webhook and model credential in the
 consumer's secret store; they do not belong in `ReleaseKitConfig`.
 
+#### Announce-once
+
+`announceReleaseToDiscord` posts a given `version` **at most once** by
+default. This matters because deploy-kit's `deliveryEvent` hook — the usual
+place consumers wire this call in — fires once per deploy, not once per
+release; without announce-once, redeploying the same release re-posts the
+same announcement to Discord every time. `announceReleaseToDiscord` now
+tracks what it has already posted in a small on-disk ledger and skips a
+version it recognizes:
+
+```ts
+const result = await announceReleaseToDiscord({ config, version, fragments, webhookUrl, generate });
+if (result.skipped) {
+  // { skipped: true, version, statePath } — already announced, nothing was posted.
+} else {
+  // { skipped: false, aiSummary, work, payload } — posted just now.
+}
+```
+
+Options:
+
+- `announceOnce` (default `true`) — set to `false` to always post,
+  bypassing the ledger check entirely (the version is still recorded).
+- `force` (default `false`) — post even if the version is already recorded
+  as announced; equivalent to a one-off override without disabling
+  announce-once for future calls.
+- `stateFile` — an explicit path to the ledger file, taking priority over
+  every other resolution source below.
+
+The version is recorded **only after a successful post** — a failed webhook
+call (a non-2xx response, a thrown fetch) never marks the version as
+announced, so a later retry still posts. Ledger writes are best-effort: a
+write failure is logged via `console.warn` and never throws, so a
+filesystem hiccup can't fail an otherwise-successful deploy.
+
+**Ledger path resolution.** `resolveAnnouncementStatePath(config, options?)`
+picks the ledger file, first match wins:
+
+1. `options.stateFile` passed to `announceReleaseToDiscord`.
+2. the `RELEASE_ANNOUNCE_STATE` environment variable.
+3. `config.paths.announcementStateFile` (a relative path, resolved against
+   `config.rootDir`) — set this when you want the ledger to live at a fixed
+   spot in your repo.
+4. `DEPLOY_KIT_SHARED_DIR` + `/release-announcements.json` — deploy-kit sets
+   this to point at `/srv/<app>/shared`, a directory that survives a
+   release-dir swap.
+5. a sibling `shared/` directory, probed one level up
+   (`<rootDir>/../shared/release-announcements.json`) and then two levels up
+   (`<rootDir>/../../shared/release-announcements.json`), first one that
+   exists wins. deploy-kit's real releases layout is
+   `/srv/<app>/releases/<stamp>/` with `shared/` a sibling of `releases/` —
+   two levels up from a release's `rootDir`, which is the physical
+   (symlink-resolved) path, not the `current` symlink itself. The one-level
+   probe stays first for flatter layouts that put `shared/` directly beside
+   the release directory.
+6. `<rootDir>/.release-announcements.json` as a last resort. This one is
+   **not durable**: it lives inside the release directory deploy-kit swaps
+   out wholesale on every deploy, so recorded state does not survive across
+   deploys. `resolveAnnouncementStatePath` reports this via
+   `{ durable: false, source: 'fallback' }` in its return value.
+
+**Namespacing by product.** Ledger entries are keyed on `version` *and*
+`config.productName`, not version alone — two apps that happen to share a
+ledger file (via `DEPLOY_KIT_SHARED_DIR` or the sibling-`shared/` fallback)
+and both release e.g. `1.0.0` don't suppress each other. A ledger entry
+written before namespacing existed has no `product` field; such a legacy
+entry is treated as matching any product, so upgrading to a namespaced
+build doesn't cause a spurious re-announce of whatever the legacy entry
+already recorded.
+
+**Ledger writes are atomic.** `recordAnnouncedVersion` writes to a temp
+file in the same directory as the ledger and then renames it into place, so
+a concurrent reader never observes a partially-written file.
+
+**Residual race window (accepted, not fixed).** The has-announced check and
+the record-write are not atomic *with each other* — there is no lock across
+them. Two possible consequences: (a) two genuinely simultaneous deploys can
+both pass the check before either records, and both post; (b) a crash or
+process exit after Discord accepts the post but before
+`recordAnnouncedVersion` runs causes one repost on the next deploy. This is
+accepted as-is because deploys are serial in practice — deliberately no
+locking has been added to close this window.
+
+The lower-level ledger primitives (`readAnnouncedVersions`,
+`hasAnnouncedVersion`, `recordAnnouncedVersion`) are also exported directly,
+for a consumer that wants to inspect or manage the ledger outside of
+`announceReleaseToDiscord`.
+
 Most functions are deterministic and filesystem-light (given fragments +
 an injected date/commit), which makes them easy to test in temporary
 directories — see `src/__tests__/` in this repo for examples, including a

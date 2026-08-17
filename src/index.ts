@@ -50,7 +50,23 @@ export type {
   PostReleaseToDiscordOptions,
   AnnounceReleaseToDiscordOptions,
   ReleaseAnnouncementResult,
+  ReleaseAnnouncementPosted,
+  ReleaseAnnouncementSkipped,
 } from './announcement';
+
+export {
+  resolveAnnouncementStatePath,
+  readAnnouncedVersions,
+  hasAnnouncedVersion,
+  recordAnnouncedVersion,
+} from './announced';
+export type {
+  ResolveAnnouncementStatePathOptions,
+  AnnouncementStatePathSource,
+  AnnouncementStatePathResolution,
+  AnnouncedVersionEntry,
+  AnnouncedVersionsFile,
+} from './announced';
 
 export { createAnthropicReleaseSummaryGenerator } from './anthropic';
 export type {

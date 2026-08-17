@@ -1,6 +1,11 @@
 import type { ReleaseKitConfig } from './config';
 import type { Fragment } from './fragments';
 import { summarizeReleaseWork, type ReleaseWorkSummary } from './work-summary';
+import {
+  hasAnnouncedVersion,
+  recordAnnouncedVersion,
+  resolveAnnouncementStatePath,
+} from './announced';
 
 const DISCORD_EMBED_CHARACTER_LIMIT = 6000;
 const DISCORD_EMBED_DESCRIPTION_LIMIT = 3500;
@@ -77,13 +82,28 @@ export interface AnnounceReleaseToDiscordOptions
   audience?: string;
   maxSummaryCharacters?: number;
   fetch?: DiscordFetch;
+  /** Explicit override for the announce-once ledger path; see `resolveAnnouncementStatePath`. */
+  stateFile?: string;
+  /** Post even if this version is already recorded as announced. Default false. */
+  force?: boolean;
+  /** Skip a version already recorded as announced. Default true. */
+  announceOnce?: boolean;
 }
 
-export interface ReleaseAnnouncementResult {
+export interface ReleaseAnnouncementPosted {
+  skipped: false;
   aiSummary: string;
   work: ReleaseWorkSummary;
   payload: DiscordReleasePayload;
 }
+
+export interface ReleaseAnnouncementSkipped {
+  skipped: true;
+  version: string;
+  statePath: string;
+}
+
+export type ReleaseAnnouncementResult = ReleaseAnnouncementPosted | ReleaseAnnouncementSkipped;
 
 function truncate(value: string, maxCharacters: number): string {
   const normalized = value.trim();
@@ -215,6 +235,28 @@ export async function postReleaseToDiscord(options: PostReleaseToDiscordOptions)
 export async function announceReleaseToDiscord(
   options: AnnounceReleaseToDiscordOptions,
 ): Promise<ReleaseAnnouncementResult> {
+  const { path: statePath, durable } = resolveAnnouncementStatePath(options.config, {
+    stateFile: options.stateFile,
+  });
+  const announceOnce = options.announceOnce !== false;
+
+  // A non-durable ledger silently degrades to the old re-announce-every-deploy
+  // behaviour, which is exactly the failure this guard exists to prevent — so say so.
+  if (announceOnce && !durable) {
+    console.warn(
+      `release-kit: announce-once state at ${statePath} is not durable across deploys; ` +
+        'set RELEASE_ANNOUNCE_STATE (or paths.announcementStateFile) to a path outside the release directory.',
+    );
+  }
+
+  if (
+    announceOnce &&
+    !options.force &&
+    hasAnnouncedVersion(statePath, options.version, options.config.productName)
+  ) {
+    return { skipped: true, version: options.version, statePath };
+  }
+
   const work = summarizeReleaseWork(options.config, options.fragments);
   const aiSummary = await generateAiReleaseSummary(options.config, work, {
     version: options.version,
@@ -230,5 +272,6 @@ export async function announceReleaseToDiscord(
     avatarUrl: options.avatarUrl,
   });
   await postReleaseToDiscord({ webhookUrl: options.webhookUrl, payload, fetch: options.fetch });
-  return { aiSummary, work, payload };
+  recordAnnouncedVersion(statePath, options.version, options.config.productName);
+  return { skipped: false, aiSummary, work, payload };
 }

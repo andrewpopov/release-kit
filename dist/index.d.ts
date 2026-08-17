@@ -13,7 +13,9 @@ export type { ReleaseNotesTarget, ReleaseNotesPublishContext, ChangelogTargetOpt
 export { summarizeReleaseWork } from './work-summary';
 export type { ReleaseWorkItem, ReleaseWorkGroup, ReleaseWorkSummary } from './work-summary';
 export { buildAiReleaseSummaryPrompt, generateAiReleaseSummary, buildDiscordReleasePayload, postReleaseToDiscord, announceReleaseToDiscord, } from './announcement';
-export type { AiReleaseSummaryRequest, AiReleaseSummaryGenerator, GenerateAiReleaseSummaryOptions, DiscordEmbedField, DiscordReleasePayload, BuildDiscordReleasePayloadOptions, DiscordFetchResponse, DiscordFetch, PostReleaseToDiscordOptions, AnnounceReleaseToDiscordOptions, ReleaseAnnouncementResult, } from './announcement';
+export type { AiReleaseSummaryRequest, AiReleaseSummaryGenerator, GenerateAiReleaseSummaryOptions, DiscordEmbedField, DiscordReleasePayload, BuildDiscordReleasePayloadOptions, DiscordFetchResponse, DiscordFetch, PostReleaseToDiscordOptions, AnnounceReleaseToDiscordOptions, ReleaseAnnouncementResult, ReleaseAnnouncementPosted, ReleaseAnnouncementSkipped, } from './announcement';
+export { resolveAnnouncementStatePath, readAnnouncedVersions, hasAnnouncedVersion, recordAnnouncedVersion, } from './announced';
+export type { ResolveAnnouncementStatePathOptions, AnnouncementStatePathSource, AnnouncementStatePathResolution, AnnouncedVersionEntry, AnnouncedVersionsFile, } from './announced';
 export { createAnthropicReleaseSummaryGenerator } from './anthropic';
 export type { AnthropicFetchResponse, AnthropicFetch, AnthropicReleaseSummaryOptions, } from './anthropic';
 export { resolveVersion, nextVersion, getGitShortSha, bumpVersion, listReleaseSummaries, updatePatchNotesIndex, publishRelease, validateReleaseState, cutRelease, createReleaseArtifactV1, } from './publish';

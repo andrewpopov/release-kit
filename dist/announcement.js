@@ -6,6 +6,7 @@ exports.buildDiscordReleasePayload = buildDiscordReleasePayload;
 exports.postReleaseToDiscord = postReleaseToDiscord;
 exports.announceReleaseToDiscord = announceReleaseToDiscord;
 const work_summary_1 = require("./work-summary");
+const announced_1 = require("./announced");
 const DISCORD_EMBED_CHARACTER_LIMIT = 6000;
 const DISCORD_EMBED_DESCRIPTION_LIMIT = 3500;
 const DISCORD_FIELD_VALUE_LIMIT = 1024;
@@ -116,6 +117,21 @@ async function postReleaseToDiscord(options) {
     }
 }
 async function announceReleaseToDiscord(options) {
+    const { path: statePath, durable } = (0, announced_1.resolveAnnouncementStatePath)(options.config, {
+        stateFile: options.stateFile,
+    });
+    const announceOnce = options.announceOnce !== false;
+    // A non-durable ledger silently degrades to the old re-announce-every-deploy
+    // behaviour, which is exactly the failure this guard exists to prevent — so say so.
+    if (announceOnce && !durable) {
+        console.warn(`release-kit: announce-once state at ${statePath} is not durable across deploys; ` +
+            'set RELEASE_ANNOUNCE_STATE (or paths.announcementStateFile) to a path outside the release directory.');
+    }
+    if (announceOnce &&
+        !options.force &&
+        (0, announced_1.hasAnnouncedVersion)(statePath, options.version, options.config.productName)) {
+        return { skipped: true, version: options.version, statePath };
+    }
     const work = (0, work_summary_1.summarizeReleaseWork)(options.config, options.fragments);
     const aiSummary = await generateAiReleaseSummary(options.config, work, {
         version: options.version,
@@ -131,5 +147,6 @@ async function announceReleaseToDiscord(options) {
         avatarUrl: options.avatarUrl,
     });
     await postReleaseToDiscord({ webhookUrl: options.webhookUrl, payload, fetch: options.fetch });
-    return { aiSummary, work, payload };
+    (0, announced_1.recordAnnouncedVersion)(statePath, options.version, options.config.productName);
+    return { skipped: false, aiSummary, work, payload };
 }

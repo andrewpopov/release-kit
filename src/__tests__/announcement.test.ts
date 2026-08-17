@@ -1,4 +1,7 @@
-import { describe, expect, test, vi } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { Fragment } from '../fragments';
 import {
   announceReleaseToDiscord,
@@ -7,6 +10,7 @@ import {
   generateAiReleaseSummary,
   postReleaseToDiscord,
 } from '../announcement';
+import { hasAnnouncedVersion, readAnnouncedVersions } from '../announced';
 import { summarizeReleaseWork } from '../work-summary';
 import { makeRougeConfig } from './fixtures/rougeConfig';
 
@@ -130,7 +134,191 @@ describe('AI release announcements', () => {
 
     expect(generate).toHaveBeenCalledOnce();
     expect(fetch).toHaveBeenCalledOnce();
+    expect(result.skipped).toBe(false);
+    if (result.skipped) {
+      throw new Error('expected the announcement to post, not skip');
+    }
     expect(result.aiSummary).toBe('A sharper town handoff with clearer rewards.');
     expect(result.work.itemCount).toBe(2);
+  });
+});
+
+describe('announce-once semantics', () => {
+  let tmpDir: string;
+  let stateFile: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-kit-announce-once-'));
+    stateFile = path.join(tmpDir, 'state.json');
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('skips a version already recorded, without calling generate or fetch', async () => {
+    const generate = vi.fn(async () => 'unused');
+    const fetch = vi.fn(async () => ({ ok: true, status: 204, text: async () => '' }));
+
+    const first = await announceReleaseToDiscord({
+      config: makeRougeConfig(tmpDir),
+      version: '0.1.0-alpha.3',
+      fragments,
+      webhookUrl: 'https://discord.com/api/webhooks/123/token',
+      generate,
+      fetch,
+      stateFile,
+    });
+    expect(first.skipped).toBe(false);
+    expect(generate).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledOnce();
+
+    const second = await announceReleaseToDiscord({
+      config: makeRougeConfig(tmpDir),
+      version: '0.1.0-alpha.3',
+      fragments,
+      webhookUrl: 'https://discord.com/api/webhooks/123/token',
+      generate,
+      fetch,
+      stateFile,
+    });
+
+    expect(second).toEqual({ skipped: true, version: '0.1.0-alpha.3', statePath: stateFile });
+    expect(generate).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  test('force posts again even if the version is already recorded', async () => {
+    const generate = vi.fn(async () => 'A sharper town handoff with clearer rewards.');
+    const fetch = vi.fn(async () => ({ ok: true, status: 204, text: async () => '' }));
+
+    await announceReleaseToDiscord({
+      config: makeRougeConfig(tmpDir),
+      version: '0.1.0-alpha.4',
+      fragments,
+      webhookUrl: 'https://discord.com/api/webhooks/123/token',
+      generate,
+      fetch,
+      stateFile,
+    });
+
+    const forced = await announceReleaseToDiscord({
+      config: makeRougeConfig(tmpDir),
+      version: '0.1.0-alpha.4',
+      fragments,
+      webhookUrl: 'https://discord.com/api/webhooks/123/token',
+      generate,
+      fetch,
+      stateFile,
+      force: true,
+    });
+
+    expect(forced.skipped).toBe(false);
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  test('announceOnce:false posts again even if the version is already recorded', async () => {
+    const generate = vi.fn(async () => 'A sharper town handoff with clearer rewards.');
+    const fetch = vi.fn(async () => ({ ok: true, status: 204, text: async () => '' }));
+
+    await announceReleaseToDiscord({
+      config: makeRougeConfig(tmpDir),
+      version: '0.1.0-alpha.5',
+      fragments,
+      webhookUrl: 'https://discord.com/api/webhooks/123/token',
+      generate,
+      fetch,
+      stateFile,
+    });
+
+    const again = await announceReleaseToDiscord({
+      config: makeRougeConfig(tmpDir),
+      version: '0.1.0-alpha.5',
+      fragments,
+      webhookUrl: 'https://discord.com/api/webhooks/123/token',
+      generate,
+      fetch,
+      stateFile,
+      announceOnce: false,
+    });
+
+    expect(again.skipped).toBe(false);
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  test('a successful post records the version', async () => {
+    const generate = vi.fn(async () => 'A sharper town handoff with clearer rewards.');
+    const fetch = vi.fn(async () => ({ ok: true, status: 204, text: async () => '' }));
+
+    expect(hasAnnouncedVersion(stateFile, '0.1.0-alpha.6')).toBe(false);
+
+    await announceReleaseToDiscord({
+      config: makeRougeConfig(tmpDir),
+      version: '0.1.0-alpha.6',
+      fragments,
+      webhookUrl: 'https://discord.com/api/webhooks/123/token',
+      generate,
+      fetch,
+      stateFile,
+    });
+
+    expect(hasAnnouncedVersion(stateFile, '0.1.0-alpha.6', 'Angel Snack')).toBe(true);
+    expect(readAnnouncedVersions(stateFile).announced.map((entry) => entry.version)).toContain(
+      '0.1.0-alpha.6',
+    );
+  });
+
+  test('two products sharing a ledger file do not suppress each other for the same version', async () => {
+    const generate = vi.fn(async () => 'A sharper town handoff with clearer rewards.');
+    const fetch = vi.fn(async () => ({ ok: true, status: 204, text: async () => '' }));
+
+    const productA = { ...makeRougeConfig(tmpDir), productName: 'Angel Snack' };
+    const productB = { ...makeRougeConfig(tmpDir), productName: 'Other App' };
+
+    const first = await announceReleaseToDiscord({
+      config: productA,
+      version: '1.0.0',
+      fragments,
+      webhookUrl: 'https://discord.com/api/webhooks/123/token',
+      generate,
+      fetch,
+      stateFile,
+    });
+    expect(first.skipped).toBe(false);
+
+    const second = await announceReleaseToDiscord({
+      config: productB,
+      version: '1.0.0',
+      fragments,
+      webhookUrl: 'https://discord.com/api/webhooks/123/token',
+      generate,
+      fetch,
+      stateFile,
+    });
+
+    expect(second.skipped).toBe(false);
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  test('a failed post does not record the version', async () => {
+    const generate = vi.fn(async () => 'A sharper town handoff with clearer rewards.');
+    const fetch = vi.fn(async () => ({ ok: false, status: 500, text: async () => 'boom' }));
+
+    await expect(
+      announceReleaseToDiscord({
+        config: makeRougeConfig(tmpDir),
+        version: '0.1.0-alpha.7',
+        fragments,
+        webhookUrl: 'https://discord.com/api/webhooks/123/token',
+        generate,
+        fetch,
+        stateFile,
+      }),
+    ).rejects.toThrow(/status 500/);
+
+    expect(hasAnnouncedVersion(stateFile, '0.1.0-alpha.7')).toBe(false);
   });
 });

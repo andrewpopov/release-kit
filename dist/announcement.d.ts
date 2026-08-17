@@ -58,12 +58,25 @@ export interface AnnounceReleaseToDiscordOptions extends Omit<BuildDiscordReleas
     audience?: string;
     maxSummaryCharacters?: number;
     fetch?: DiscordFetch;
+    /** Explicit override for the announce-once ledger path; see `resolveAnnouncementStatePath`. */
+    stateFile?: string;
+    /** Post even if this version is already recorded as announced. Default false. */
+    force?: boolean;
+    /** Skip a version already recorded as announced. Default true. */
+    announceOnce?: boolean;
 }
-export interface ReleaseAnnouncementResult {
+export interface ReleaseAnnouncementPosted {
+    skipped: false;
     aiSummary: string;
     work: ReleaseWorkSummary;
     payload: DiscordReleasePayload;
 }
+export interface ReleaseAnnouncementSkipped {
+    skipped: true;
+    version: string;
+    statePath: string;
+}
+export type ReleaseAnnouncementResult = ReleaseAnnouncementPosted | ReleaseAnnouncementSkipped;
 export declare function buildAiReleaseSummaryPrompt(config: ReleaseKitConfig, work: ReleaseWorkSummary, options: Pick<GenerateAiReleaseSummaryOptions, 'version' | 'audience' | 'maxCharacters'>): AiReleaseSummaryRequest;
 export declare function generateAiReleaseSummary(config: ReleaseKitConfig, work: ReleaseWorkSummary, options: GenerateAiReleaseSummaryOptions): Promise<string>;
 export declare function buildDiscordReleasePayload(config: ReleaseKitConfig, work: ReleaseWorkSummary, options: BuildDiscordReleasePayloadOptions): DiscordReleasePayload;
