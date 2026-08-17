@@ -73,6 +73,13 @@ export interface ReleaseKitPaths {
   notesDir: string;
   /** Relative (POSIX-style) path to the patch-notes index file, e.g. `docs/PATCH_NOTES.md`. */
   indexPath: string;
+  /**
+   * Optional relative path (resolved against `rootDir`) to the announce-once
+   * ledger `announceReleaseToDiscord` uses to avoid re-posting a release. See
+   * `resolveAnnouncementStatePath` in `announced.ts` for the full resolution
+   * order this participates in.
+   */
+  announcementStateFile?: string;
 }
 
 export interface ReleaseKitConfig {
