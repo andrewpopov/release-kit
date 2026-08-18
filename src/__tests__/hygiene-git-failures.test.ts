@@ -73,8 +73,9 @@ function makeShallowNoCommonAncestorRepo(): string {
  * running. This reproduces exactly what `execFileSync` reports for a
  * `merge-base` that's killed by a signal or times out (`status: null`,
  * `signal` set) — the "unrecognized, not a missing-history problem" shape
- * PKG-140 finding C is about — instantly and deterministically, instead of
- * waiting out the real 10s timeout.
+ * PKG-140 finding C is about — deterministically, instead of waiting out the
+ * real 10s timeout. Note it is not instant: the shim's own `sleep 5` still
+ * runs, so a test using it needs an explicit timeout above vitest's default.
  */
 function makeMergeBaseKillingGitShim(): string {
   const realGitPath = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
@@ -272,5 +273,9 @@ describe('hygiene.allowMissingHistory — explicit, opt-in, loud downgrade', () 
       fs.rmSync(rootDir, { recursive: true, force: true });
       fs.rmSync(shimDir, { recursive: true, force: true });
     }
-  });
+    // The shim self-terminates but still runs out its `sleep 5`, and hygiene
+    // invokes `merge-base` twice, so this lands just over vitest's 5s default
+    // and fails as a timeout rather than on its assertions. It has been red on
+    // master, unnoticed, because this repo had no pre-push gate to run it.
+  }, 30_000);
 });
