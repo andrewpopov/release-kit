@@ -46,7 +46,8 @@
     "release:bump": "node dist/cli.js bump",
     "release:cut": "node dist/cli.js cut",
     "release:check": "node dist/cli.js check",
-    "release:hygiene": "node dist/cli.js hygiene"
+    "release:hygiene": "node dist/cli.js hygiene",
+    "prepare": "git config core.hooksPath .githooks || true"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
