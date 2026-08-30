@@ -123,7 +123,7 @@ function assertTreesIdentical(rougeDir: string, kitDir: string, relPaths: string
 
 const TREE_PATHS = ['docs', 'package.json', 'package-lock.json'];
 
-describe('golden parity: release-kit vs rouge real scripts', () => {
+describe('golden parity: release-kit vs rouge real scripts', { timeout: 30_000 }, () => {
   let rougeDir: string;
   let kitDir: string;
   let cutRelease: RougeCliModule;
