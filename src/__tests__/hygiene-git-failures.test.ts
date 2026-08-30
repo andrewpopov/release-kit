@@ -88,7 +88,7 @@ function makeMergeBaseKillingGitShim(): string {
   return shimDir;
 }
 
-describe('hygiene fails CLOSED on git failures (PKG-140 finding 1)', () => {
+describe('hygiene fails CLOSED on git failures (PKG-140 finding 1)', { timeout: 30_000 }, () => {
   test('git binary unavailable throws git-unavailable and does NOT return an empty pass', () => {
     const rootDir = makeGitRoot();
     const originalPath = process.env.PATH;
@@ -277,5 +277,5 @@ describe('hygiene.allowMissingHistory — explicit, opt-in, loud downgrade', () 
     // invokes `merge-base` twice, so this lands just over vitest's 5s default
     // and fails as a timeout rather than on its assertions. It has been red on
     // master, unnoticed, because this repo had no pre-push gate to run it.
-  }, 30_000);
+  });
 });

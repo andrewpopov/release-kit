@@ -1,6 +1,6 @@
 {
   "name": "@andrewpopov/release-kit",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Reusable release/patch-note toolkit: alpha and stable semver strategies, fragment-based patch notes, release cut/publish/validate, and release-hygiene enforcement. Consumers inject all policy (paths, kinds, wording) via a small config.",
   "author": "Andrew Popov",
   "license": "MIT",
@@ -40,7 +40,7 @@
     "verify:pack": "node scripts/verify-pack.mjs",
     "verify:dist-fresh": "node scripts/verify-dist-fresh.mjs",
     "verify:tag": "node scripts/verify-release-tag.mjs",
-    "verify": "npm run typecheck && npm test && npm run build && npm run verify:pack && npm audit --omit=dev --audit-level=high",
+    "verify": "npm run typecheck && npm test && npm run build && npm run verify:dist-fresh && npm run verify:pack && npm run release:check && npm audit --omit=dev --audit-level=high",
     "release:note": "node dist/cli.js note",
     "release:notes": "node dist/cli.js notes",
     "release:bump": "node dist/cli.js bump",

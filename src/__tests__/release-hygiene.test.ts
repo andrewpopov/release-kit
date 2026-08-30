@@ -69,7 +69,7 @@ function writeFragment(rootDir: string): void {
   );
 }
 
-describe('release-hygiene (ported from rouge)', () => {
+describe('release-hygiene (ported from rouge)', { timeout: 30_000 }, () => {
   test('docs and tests only do not require a patch-note fragment', () => {
     const config = makeRougeConfig('/unused');
     const result = classifyReleaseHygiene(config, ['docs/GAME_GUIDE.md', 'tests/combat-flow.test.ts']);
@@ -237,7 +237,7 @@ describe('release-hygiene (ported from rouge)', () => {
 // too, but ONLY for fragments the current change adds or modifies: it must
 // not retroactively fail a push over pre-existing placeholder debt elsewhere
 // in the repo.
-describe('release-hygiene placeholder-body ratchet', () => {
+describe('release-hygiene placeholder-body ratchet', { timeout: 30_000 }, () => {
   function writeFragmentWithBody(rootDir: string, fileName: string, body: string): void {
     const notesDir = path.join(rootDir, 'docs', 'patch-notes', 'unreleased');
     fs.mkdirSync(notesDir, { recursive: true });
@@ -336,7 +336,7 @@ describe('release-hygiene placeholder-body ratchet', () => {
 // fragments the current change adds or modifies, via the same
 // `validateFragmentContent` helper `parseFragment` uses, so the two paths
 // cannot drift apart the way they just did for the placeholder-body rule.
-describe('release-hygiene summary trailing-period ratchet', () => {
+describe('release-hygiene summary trailing-period ratchet', { timeout: 30_000 }, () => {
   function writeFragmentWithSummary(rootDir: string, fileName: string, summary: string): void {
     const notesDir = path.join(rootDir, 'docs', 'patch-notes', 'unreleased');
     fs.mkdirSync(notesDir, { recursive: true });
