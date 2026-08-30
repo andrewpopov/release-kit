@@ -22,7 +22,7 @@ rationale.
 This package is distributed via GitHub tags (not npm):
 
 ```bash
-npm install github:andrewpopov/release-kit#v0.1.4
+npm install github:andrewpopov/release-kit#v0.6.1
 ```
 
 ## Quick start

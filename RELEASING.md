@@ -22,10 +22,12 @@ hosted CI checks. The CHANGELOG and version bump are produced by
 
    ```bash
    npm ci
-   npm run verify:dist-fresh
    npm run verify
-   npm audit --audit-level=high
    ```
+
+   `verify` includes type checking, tests, build, committed-`dist/` freshness,
+   packed-consumer verification, release-state validation, and the runtime
+   dependency audit.
 
 3. **Cut the release:** `npm run release:cut` compiles the unreleased
    fragments into a new `## <version>` section at the top of `CHANGELOG.md`,
