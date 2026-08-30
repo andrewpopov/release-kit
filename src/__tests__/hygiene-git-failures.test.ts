@@ -277,5 +277,5 @@ describe('hygiene.allowMissingHistory — explicit, opt-in, loud downgrade', () 
     // invokes `merge-base` twice, so this lands just over vitest's 5s default
     // and fails as a timeout rather than on its assertions. It has been red on
     // master, unnoticed, because this repo had no pre-push gate to run it.
-  });
+  }, 30_000);
 });
