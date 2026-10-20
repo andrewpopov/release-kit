@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { ReleaseKitConfig } from './config';
 import { releaseLinkPath, resolvePaths } from './config';
-import type { Fragment } from './fragments';
+import { collectFragments, type Fragment } from './fragments';
 import { parseReleaseSummary, renderReleaseNote } from './render';
 import { listReleaseSummaries, tryStep, updatePatchNotesIndex } from './publish';
 import { combineRestores, describeError, snapshotDirectory, snapshotFile } from './fs-snapshot';
@@ -322,6 +322,9 @@ export function datedNotesTarget(repository: string): ReleaseNotesTarget {
     hasVersion(config, version) { return records(config).some(record => record.version === version); },
     validate(config, version) {
       try {
+        if (collectFragments(config).length > 0) {
+          return ['Unpublished release notes: cut and commit the dated notes before qualifying this release candidate.'];
+        }
         return records(config).some(record => record.version === version) ? [] : [`No dated release notes for ${version}.`];
       } catch (error) { return [error instanceof Error ? error.message : String(error)]; }
     },

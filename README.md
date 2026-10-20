@@ -239,6 +239,11 @@ the Markdown index. Existing files cannot be overwritten. The brief summary is
 derived from fragment summaries and capped at 360 characters; edit it in the
 release PR when a shorter editorial summary is clearer.
 
+For a dated target, `release-kit check` refuses a candidate with unreleased
+fragments, even if its current version was announced before. Run it before the
+release candidate's full verification. Cut and commit notes before qualifying
+the candidate; never change notes or versions on a verified deployment target.
+
 Each file has front matter (`version`, `commit`, `releasedAt`, `summary`) and
 the complete Markdown body. `writeDatedReleaseNotes(directory, record)` creates
 the same format for apps that publish dated updates without a semver cut.

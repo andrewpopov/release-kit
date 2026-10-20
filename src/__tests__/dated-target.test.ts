@@ -58,3 +58,14 @@ test('rolls a failed dated cut back, including the consumed fragments', () => {
   expect(fs.existsSync(path.join(root, config.paths.notesDir, 'unreleased', 'fix-care.md'))).toBe(true);
   expect(fs.existsSync(path.join(directory, '2026-10-20-0.1.0-alpha.1.md'))).toBe(false);
 });
+
+test('a release check refuses newer fragments left unpublished under an already announced version', () => {
+  const { root, config } = fixture();
+  cutRelease(config, { date: '2026-10-20', commit: 'abcdef0' });
+  const fragment = path.join(root, config.paths.notesDir, 'unreleased', 'fix-newer.md');
+  fs.writeFileSync(fragment, '---\nkind: fix\nsummary: A later fix\n---\n\nThis change is not in the published notes.');
+  expect(validateReleaseState(config).errors).toContain(
+    'Unpublished release notes: cut and commit the dated notes before qualifying this release candidate.',
+  );
+  expect(validateReleaseState(config).ok).toBe(false);
+});

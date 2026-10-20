@@ -7,7 +7,7 @@
  * CI greps `^## <version>`.
  */
 import type { ReleaseKitConfig } from './config';
-import type { Fragment } from './fragments';
+import { type Fragment } from './fragments';
 import type { Guard } from './fs-snapshot';
 export interface ReleaseNotesPublishContext {
     version: string;

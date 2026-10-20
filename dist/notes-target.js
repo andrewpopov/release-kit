@@ -17,6 +17,7 @@ exports.changelogTarget = changelogTarget;
 const node_fs_1 = __importDefault(require("node:fs"));
 const node_path_1 = __importDefault(require("node:path"));
 const config_1 = require("./config");
+const fragments_1 = require("./fragments");
 const render_1 = require("./render");
 const publish_1 = require("./publish");
 const fs_snapshot_1 = require("./fs-snapshot");
@@ -259,6 +260,9 @@ function datedNotesTarget(repository) {
         hasVersion(config, version) { return records(config).some(record => record.version === version); },
         validate(config, version) {
             try {
+                if ((0, fragments_1.collectFragments)(config).length > 0) {
+                    return ['Unpublished release notes: cut and commit the dated notes before qualifying this release candidate.'];
+                }
                 return records(config).some(record => record.version === version) ? [] : [`No dated release notes for ${version}.`];
             }
             catch (error) {
