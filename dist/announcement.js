@@ -5,12 +5,9 @@ exports.generateAiReleaseSummary = generateAiReleaseSummary;
 exports.buildDiscordReleasePayload = buildDiscordReleasePayload;
 exports.postReleaseToDiscord = postReleaseToDiscord;
 exports.announceReleaseToDiscord = announceReleaseToDiscord;
+const release_history_1 = require("./release-history");
 const work_summary_1 = require("./work-summary");
 const announced_1 = require("./announced");
-const DISCORD_EMBED_CHARACTER_LIMIT = 6000;
-const DISCORD_EMBED_DESCRIPTION_LIMIT = 3500;
-const DISCORD_FIELD_VALUE_LIMIT = 1024;
-const DISCORD_FIELD_LIMIT = 25;
 function truncate(value, maxCharacters) {
     const normalized = value.trim();
     if (normalized.length <= maxCharacters) {
@@ -22,7 +19,7 @@ function truncate(value, maxCharacters) {
     return `${normalized.slice(0, maxCharacters - 1).trimEnd()}…`;
 }
 function buildAiReleaseSummaryPrompt(config, work, options) {
-    const maxCharacters = options.maxCharacters ?? 1200;
+    const maxCharacters = options.maxCharacters ?? release_history_1.RELEASE_SUMMARY_MAX_CHARACTERS;
     if (!Number.isInteger(maxCharacters) || maxCharacters < 80) {
         throw new Error('AI release summary maxCharacters must be an integer of at least 80.');
     }
@@ -53,31 +50,22 @@ async function generateAiReleaseSummary(config, work, options) {
     }
     return truncate(generated, request.maxCharacters);
 }
-function formatWorkGroup(group) {
-    return group.items
-        .map((item) => `• **${item.summary}** — ${item.description}`)
-        .join('\n');
-}
-function buildDiscordReleasePayload(config, work, options) {
+function buildDiscordReleasePayload(config, _work, options) {
     const title = truncate(`${config.productName} ${options.version} released`, 256);
-    const description = truncate(options.aiSummary, DISCORD_EMBED_DESCRIPTION_LIMIT);
-    let remainingCharacters = DISCORD_EMBED_CHARACTER_LIMIT - title.length - description.length;
+    let description = truncate(options.aiSummary, release_history_1.RELEASE_SUMMARY_MAX_CHARACTERS);
     const fields = [];
-    for (const group of work.groups.slice(0, DISCORD_FIELD_LIMIT)) {
-        const name = truncate(group.heading, 256);
-        const fieldBudget = Math.min(DISCORD_FIELD_VALUE_LIMIT, remainingCharacters - name.length);
-        if (fieldBudget < 20) {
-            break;
+    if (options.releaseUrl) {
+        const url = new URL(options.releaseUrl);
+        if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+            throw new Error('Release notes URL must use HTTP(S).');
         }
-        const value = truncate(formatWorkGroup(group), fieldBudget);
-        fields.push({ name, value, inline: false });
-        remainingCharacters -= name.length + value.length;
+        description += `\n\n[Full release notes](${url.href})`;
     }
     const embed = { title, description, fields };
     if (options.releaseUrl) {
         embed.url = options.releaseUrl;
     }
-    const payload = { embeds: [embed] };
+    const payload = { allowed_mentions: { parse: [] }, embeds: [embed] };
     if (options.username) {
         payload.username = options.username;
     }

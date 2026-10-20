@@ -1,6 +1,11 @@
 // Shorthand re-exports (no renaming) so cjs-module-lexer statically detects
 // the named exports for ESM consumers of the CommonJS build.
 
+export { RELEASE_SUMMARY_MAX_CHARACTERS, validateReleaseNotesRecord,
+  createFileReleaseNotesReader, readDatedReleaseNotes, writeDatedReleaseNotes, releaseNotesUrl, buildReleaseNotification } from './release-history';
+export type { ReleaseNotesRecord, ReleaseNotesPage, ReleaseNotesReader, ReleaseNotesFiles, ReleaseNotification } from './release-history';
+export { announceDatedReleaseToDiscord } from './dated-announcement';
+
 export { defineConfig, resolvePaths, notesDirPosix, archiveDirPosix, releaseLinkPath, renderTitle, titleRegExp, applyTemplate } from './config';
 export type { ReleaseKitConfig, ReleaseKitPaths, ReleaseKindDef, HygieneConfig, ResolvedPaths } from './config';
 
@@ -25,7 +30,7 @@ export type { Fragment, ParsedFrontMatter, WriteNewFragmentOptions } from './fra
 export { renderReleaseNote, parseReleaseSummary, renderPatchNotesIndex } from './render';
 export type { ReleaseSummary, RenderReleaseNoteOptions } from './render';
 
-export { patchNotesDirTarget, changelogTarget } from './notes-target';
+export { patchNotesDirTarget, changelogTarget, datedNotesTarget } from './notes-target';
 export type { ReleaseNotesTarget, ReleaseNotesPublishContext, ChangelogTargetOptions } from './notes-target';
 
 export { summarizeReleaseWork } from './work-summary';

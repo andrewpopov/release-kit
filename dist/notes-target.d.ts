@@ -65,6 +65,8 @@ export interface ReleaseNotesTarget {
  * `golden.test.ts` / `rouge-real-files.test.ts`.
  */
 export declare function patchNotesDirTarget(): ReleaseNotesTarget;
+/** Git-reviewed files consumed by the authenticated product page and notification sinks. */
+export declare function datedNotesTarget(repository: string): ReleaseNotesTarget;
 export interface ChangelogTargetOptions {
     /** Relative (POSIX-style) path to the changelog file, resolved against `config.rootDir`. Default: `"CHANGELOG.md"`. */
     changelogPath?: string;

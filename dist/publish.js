@@ -49,7 +49,7 @@ function tryStep(errors, fn, fallback, prefix = '') {
 }
 /** Resolves the config's notes target, defaulting to `patchNotesDirTarget()` (rouge's current behavior). */
 function resolveNotesTarget(config) {
-    return config.notesTarget ?? (0, notes_target_1.patchNotesDirTarget)();
+    return config.notesTarget ?? (config.history ? (0, notes_target_1.datedNotesTarget)(config.history.repository) : (0, notes_target_1.patchNotesDirTarget)());
 }
 /** Returns `explicitVersion` trimmed, or the manifest's current version. */
 function resolveVersion(config, explicitVersion) {

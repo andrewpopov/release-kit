@@ -1,16 +1,12 @@
 import type { ReleaseKitConfig } from './config';
 import type { Fragment } from './fragments';
+import { RELEASE_SUMMARY_MAX_CHARACTERS } from './release-history';
 import { summarizeReleaseWork, type ReleaseWorkSummary } from './work-summary';
 import {
   hasAnnouncedVersion,
   recordAnnouncedVersion,
   resolveAnnouncementStatePath,
 } from './announced';
-
-const DISCORD_EMBED_CHARACTER_LIMIT = 6000;
-const DISCORD_EMBED_DESCRIPTION_LIMIT = 3500;
-const DISCORD_FIELD_VALUE_LIMIT = 1024;
-const DISCORD_FIELD_LIMIT = 25;
 
 export interface AiReleaseSummaryRequest {
   systemPrompt: string;
@@ -34,6 +30,7 @@ export interface DiscordEmbedField {
 }
 
 export interface DiscordReleasePayload {
+  allowed_mentions?: { parse: [] };
   username?: string;
   avatar_url?: string;
   embeds: Array<{
@@ -121,7 +118,7 @@ export function buildAiReleaseSummaryPrompt(
   work: ReleaseWorkSummary,
   options: Pick<GenerateAiReleaseSummaryOptions, 'version' | 'audience' | 'maxCharacters'>,
 ): AiReleaseSummaryRequest {
-  const maxCharacters = options.maxCharacters ?? 1200;
+  const maxCharacters = options.maxCharacters ?? RELEASE_SUMMARY_MAX_CHARACTERS;
   if (!Number.isInteger(maxCharacters) || maxCharacters < 80) {
     throw new Error('AI release summary maxCharacters must be an integer of at least 80.');
   }
@@ -158,38 +155,27 @@ export async function generateAiReleaseSummary(
   return truncate(generated, request.maxCharacters);
 }
 
-function formatWorkGroup(group: ReleaseWorkSummary['groups'][number]): string {
-  return group.items
-    .map((item) => `• **${item.summary}** — ${item.description}`)
-    .join('\n');
-}
-
 export function buildDiscordReleasePayload(
-  config: ReleaseKitConfig,
-  work: ReleaseWorkSummary,
+  config: Pick<ReleaseKitConfig, 'productName'>,
+  _work: ReleaseWorkSummary,
   options: BuildDiscordReleasePayloadOptions,
 ): DiscordReleasePayload {
   const title = truncate(`${config.productName} ${options.version} released`, 256);
-  const description = truncate(options.aiSummary, DISCORD_EMBED_DESCRIPTION_LIMIT);
-  let remainingCharacters = DISCORD_EMBED_CHARACTER_LIMIT - title.length - description.length;
+  let description = truncate(options.aiSummary, RELEASE_SUMMARY_MAX_CHARACTERS);
   const fields: DiscordEmbedField[] = [];
-
-  for (const group of work.groups.slice(0, DISCORD_FIELD_LIMIT)) {
-    const name = truncate(group.heading, 256);
-    const fieldBudget = Math.min(DISCORD_FIELD_VALUE_LIMIT, remainingCharacters - name.length);
-    if (fieldBudget < 20) {
-      break;
+  if (options.releaseUrl) {
+    const url = new URL(options.releaseUrl);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+      throw new Error('Release notes URL must use HTTP(S).');
     }
-    const value = truncate(formatWorkGroup(group), fieldBudget);
-    fields.push({ name, value, inline: false });
-    remainingCharacters -= name.length + value.length;
+    description += `\n\n[Full release notes](${url.href})`;
   }
 
   const embed: DiscordReleasePayload['embeds'][number] = { title, description, fields };
   if (options.releaseUrl) {
     embed.url = options.releaseUrl;
   }
-  const payload: DiscordReleasePayload = { embeds: [embed] };
+  const payload: DiscordReleasePayload = { allowed_mentions: { parse: [] }, embeds: [embed] };
   if (options.username) {
     payload.username = options.username;
   }

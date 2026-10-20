@@ -1,3 +1,6 @@
+export { RELEASE_SUMMARY_MAX_CHARACTERS, validateReleaseNotesRecord, createFileReleaseNotesReader, readDatedReleaseNotes, writeDatedReleaseNotes, releaseNotesUrl, buildReleaseNotification } from './release-history';
+export type { ReleaseNotesRecord, ReleaseNotesPage, ReleaseNotesReader, ReleaseNotesFiles, ReleaseNotification } from './release-history';
+export { announceDatedReleaseToDiscord } from './dated-announcement';
 export { defineConfig, resolvePaths, notesDirPosix, archiveDirPosix, releaseLinkPath, renderTitle, titleRegExp, applyTemplate } from './config';
 export type { ReleaseKitConfig, ReleaseKitPaths, ReleaseKindDef, HygieneConfig, ResolvedPaths } from './config';
 export { alphaSemver, stableSemver, ALPHA_VERSION_RE, STABLE_VERSION_RE, resolveBumpLevel, DEFAULT_KIND_BUMP } from './version';
@@ -8,7 +11,7 @@ export { parseFrontMatter, slugify, todayIso, isFragmentFile, parseFragment, col
 export type { Fragment, ParsedFrontMatter, WriteNewFragmentOptions } from './fragments';
 export { renderReleaseNote, parseReleaseSummary, renderPatchNotesIndex } from './render';
 export type { ReleaseSummary, RenderReleaseNoteOptions } from './render';
-export { patchNotesDirTarget, changelogTarget } from './notes-target';
+export { patchNotesDirTarget, changelogTarget, datedNotesTarget } from './notes-target';
 export type { ReleaseNotesTarget, ReleaseNotesPublishContext, ChangelogTargetOptions } from './notes-target';
 export { summarizeReleaseWork } from './work-summary';
 export type { ReleaseWorkItem, ReleaseWorkGroup, ReleaseWorkSummary } from './work-summary';

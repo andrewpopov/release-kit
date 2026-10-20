@@ -70,7 +70,7 @@ describe('AI release announcements', () => {
     ).rejects.toThrow(/empty summary/);
   });
 
-  test('builds a Discord embed containing the AI summary and released work', () => {
+  test('builds a brief linked embed without repeating the full released work', () => {
     const config = makeRougeConfig('/unused');
     const work = summarizeReleaseWork(config, fragments);
     const payload = buildDiscordReleasePayload(config, work, {
@@ -81,11 +81,11 @@ describe('AI release announcements', () => {
 
     expect(payload.embeds[0]).toMatchObject({
       title: 'Angel Snack 0.1.0-alpha.2 released',
-      description: 'Combat handoffs and reward clarity are improved in this release.',
+      description: 'Combat handoffs and reward clarity are improved in this release.\n\n[Full release notes](https://example.com/releases/0.1.0-alpha.2)',
       url: 'https://example.com/releases/0.1.0-alpha.2',
     });
-    expect(payload.embeds[0].fields.map((field) => field.name)).toEqual(['Gameplay', 'Fixes']);
-    expect(payload.embeds[0].fields[0].value).toContain('**Town pacing**');
+    expect(payload.embeds[0].fields).toEqual([]);
+    expect(payload.allowed_mentions).toEqual({ parse: [] });
   });
 
   test('posts JSON only to a valid Discord webhook and surfaces failures', async () => {

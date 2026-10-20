@@ -59,7 +59,7 @@ export interface AnnouncedVersionsFile {
  * fallback file inside `rootDir` itself.
  */
 export function resolveAnnouncementStatePath(
-  config: ReleaseKitConfig,
+  config: Pick<ReleaseKitConfig, 'rootDir' | 'paths'>,
   options: ResolveAnnouncementStatePathOptions = {},
 ): AnnouncementStatePathResolution {
   if (options.stateFile) {

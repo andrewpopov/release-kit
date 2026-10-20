@@ -20,7 +20,7 @@ import { collectFragments, todayIso } from './fragments';
 import type { ReleaseSummary } from './render';
 import { parseReleaseSummary, renderPatchNotesIndex } from './render';
 import type { ReleaseNotesPublishContext, ReleaseNotesTarget } from './notes-target';
-import { patchNotesDirTarget } from './notes-target';
+import { patchNotesDirTarget, datedNotesTarget } from './notes-target';
 import type { BumpLevel } from './version';
 import { resolveBumpLevel } from './version';
 import { NOOP_GUARD, combineRestores, rollbackOnFailure, snapshotDirectory } from './fs-snapshot';
@@ -38,7 +38,7 @@ export function tryStep<T>(errors: string[], fn: () => T, fallback: T, prefix = 
 
 /** Resolves the config's notes target, defaulting to `patchNotesDirTarget()` (rouge's current behavior). */
 export function resolveNotesTarget(config: ReleaseKitConfig): ReleaseNotesTarget {
-  return config.notesTarget ?? patchNotesDirTarget();
+  return config.notesTarget ?? (config.history ? datedNotesTarget(config.history.repository) : patchNotesDirTarget());
 }
 
 /** Returns `explicitVersion` trimmed, or the manifest's current version. */

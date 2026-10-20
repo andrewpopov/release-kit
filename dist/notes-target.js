@@ -12,6 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.patchNotesDirTarget = patchNotesDirTarget;
+exports.datedNotesTarget = datedNotesTarget;
 exports.changelogTarget = changelogTarget;
 const node_fs_1 = __importDefault(require("node:fs"));
 const node_path_1 = __importDefault(require("node:path"));
@@ -19,6 +20,7 @@ const config_1 = require("./config");
 const render_1 = require("./render");
 const publish_1 = require("./publish");
 const fs_snapshot_1 = require("./fs-snapshot");
+const release_history_1 = require("./release-history");
 /** Archives consumed fragments to `archiveDir/<version>/` and deletes them from `unreleased/`. Shared by both targets. */
 function archiveConsumedFragments(config, version, fragments) {
     if (fragments.length === 0) {
@@ -228,6 +230,49 @@ function patchNotesDirTarget() {
                 }
             }
             return errors;
+        },
+    };
+}
+/** Git-reviewed files consumed by the authenticated product page and notification sinks. */
+function datedNotesTarget(repository) {
+    const records = (config) => (0, release_history_1.readDatedReleaseNotes)({
+        directory: (0, config_1.resolvePaths)(config).releasesDir, repository, product: config.productName,
+    });
+    return {
+        publish(config, ctx) {
+            const paths = (0, config_1.resolvePaths)(config);
+            const summary = ctx.fragments.map(fragment => fragment.summary).join(' · ')
+                .slice(0, release_history_1.RELEASE_SUMMARY_MAX_CHARACTERS).trim() || 'Maintenance update.';
+            const content = (0, render_1.renderReleaseNote)(config, { version: ctx.version, date: ctx.date,
+                fragments: ctx.fragments, commit: ctx.commit });
+            const releasePath = (0, release_history_1.writeDatedReleaseNotes)(paths.releasesDir, {
+                schemaVersion: 1, repository, product: config.productName, id: `${ctx.date}-${ctx.version}`,
+                version: ctx.version, commit: ctx.commit || 'unrecorded', releasedAt: `${ctx.date}T00:00:00.000Z`,
+                summary, notesMarkdown: content,
+            });
+            archiveConsumedFragments(config, ctx.version, ctx.fragments);
+            const index = [`# ${config.productName} release notes`, '', ...records(config).map(record => `- [${record.releasedAt.slice(0, 10)} · ${record.version}](${(0, config_1.releaseLinkPath)(config, `${record.id}.md`)}) — ${record.summary}`), ''];
+            node_fs_1.default.mkdirSync(node_path_1.default.dirname(paths.indexPath), { recursive: true });
+            node_fs_1.default.writeFileSync(paths.indexPath, index.join('\n'));
+            return { releasePath, content, date: ctx.date };
+        },
+        hasVersion(config, version) { return records(config).some(record => record.version === version); },
+        validate(config, version) {
+            try {
+                return records(config).some(record => record.version === version) ? [] : [`No dated release notes for ${version}.`];
+            }
+            catch (error) {
+                return [error instanceof Error ? error.message : String(error)];
+            }
+        },
+        snapshot(config, ctx) {
+            const paths = (0, config_1.resolvePaths)(config);
+            const file = (0, fs_snapshot_1.snapshotFile)(node_path_1.default.join(paths.releasesDir, `${ctx.date}-${ctx.version}.md`));
+            const index = (0, fs_snapshot_1.snapshotFile)(paths.indexPath);
+            const fragments = snapshotArchivedFragments(node_path_1.default.join(paths.archiveDir, ctx.version), ctx.fragments);
+            return { commit() { file.commit(); index.commit(); fragments.commit(); },
+                restore: (0, fs_snapshot_1.combineRestores)([(0, fs_snapshot_1.snapshotDirectory)(paths.releasesDir), file.restore,
+                    fragments.restore, (0, fs_snapshot_1.snapshotDirectory)(node_path_1.default.dirname(paths.indexPath)), index.restore]) };
         },
     };
 }
