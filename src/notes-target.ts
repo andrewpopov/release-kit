@@ -11,11 +11,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { ReleaseKitConfig } from './config';
 import { releaseLinkPath, resolvePaths } from './config';
-import type { Fragment } from './fragments';
+import { collectFragments, type Fragment } from './fragments';
 import { parseReleaseSummary, renderReleaseNote } from './render';
 import { listReleaseSummaries, tryStep, updatePatchNotesIndex } from './publish';
 import { combineRestores, describeError, snapshotDirectory, snapshotFile } from './fs-snapshot';
 import type { Guard } from './fs-snapshot';
+import { readDatedReleaseNotes, writeDatedReleaseNotes, RELEASE_SUMMARY_MAX_CHARACTERS } from './release-history';
 
 export interface ReleaseNotesPublishContext {
   version: string;
@@ -290,6 +291,51 @@ export function patchNotesDirTarget(): ReleaseNotesTarget {
         }
       }
       return errors;
+    },
+  };
+}
+
+/** Git-reviewed files consumed by the authenticated product page and notification sinks. */
+export function datedNotesTarget(repository: string): ReleaseNotesTarget {
+  const records = (config: ReleaseKitConfig) => readDatedReleaseNotes({
+    directory: resolvePaths(config).releasesDir, repository, product: config.productName,
+  });
+  return {
+    publish(config, ctx) {
+      const paths = resolvePaths(config);
+      const summary = ctx.fragments.map(fragment => fragment.summary).join(' · ')
+        .slice(0, RELEASE_SUMMARY_MAX_CHARACTERS).trim() || 'Maintenance update.';
+      const content = renderReleaseNote(config, { version: ctx.version, date: ctx.date,
+        fragments: ctx.fragments, commit: ctx.commit });
+      const releasePath = writeDatedReleaseNotes(paths.releasesDir, {
+        schemaVersion: 1, repository, product: config.productName, id: `${ctx.date}-${ctx.version}`,
+        version: ctx.version, commit: ctx.commit || 'unrecorded', releasedAt: `${ctx.date}T00:00:00.000Z`,
+        summary, notesMarkdown: content,
+      });
+      archiveConsumedFragments(config, ctx.version, ctx.fragments);
+      const index = [`# ${config.productName} release notes`, '', ...records(config).map(record =>
+        `- [${record.releasedAt.slice(0, 10)} · ${record.version}](${releaseLinkPath(config, `${record.id}.md`)}) — ${record.summary}`), ''];
+      fs.mkdirSync(path.dirname(paths.indexPath), { recursive: true });
+      fs.writeFileSync(paths.indexPath, index.join('\n'));
+      return { releasePath, content, date: ctx.date };
+    },
+    hasVersion(config, version) { return records(config).some(record => record.version === version); },
+    validate(config, version) {
+      try {
+        if (collectFragments(config).length > 0) {
+          return ['Unpublished release notes: cut and commit the dated notes before qualifying this release candidate.'];
+        }
+        return records(config).some(record => record.version === version) ? [] : [`No dated release notes for ${version}.`];
+      } catch (error) { return [error instanceof Error ? error.message : String(error)]; }
+    },
+    snapshot(config, ctx) {
+      const paths = resolvePaths(config);
+      const file = snapshotFile(path.join(paths.releasesDir, `${ctx.date}-${ctx.version}.md`));
+      const index = snapshotFile(paths.indexPath);
+      const fragments = snapshotArchivedFragments(path.join(paths.archiveDir, ctx.version), ctx.fragments);
+      return { commit() { file.commit(); index.commit(); fragments.commit(); },
+        restore: combineRestores([snapshotDirectory(paths.releasesDir), file.restore,
+          fragments.restore, snapshotDirectory(path.dirname(paths.indexPath)), index.restore]) };
     },
   };
 }

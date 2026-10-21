@@ -228,6 +228,50 @@ consumer with a custom (non-npm) manifest adapter and no `package.json` at
 the root can still produce a valid artifact. `npmPackage()` implements
 `readArtifactMetadata` by reading `name`/`repository` off `package.json`.
 
+## Dated notes and the signed-in app page
+
+Keep full release notes in Git, one dated Markdown file per release. Add
+`history: { repository: 'owner/app', notesBaseUrl: 'https://app.example/releases' }`
+to the release config. Unless `notesTarget` is explicitly set, normal `cut` and
+`publish` now use `datedNotesTarget`: they write
+`{notesDir}/releases/YYYY-MM-DD-<version>.md`, archive the fragments and update
+the Markdown index. Existing files cannot be overwritten. The brief summary is
+derived from fragment summaries and capped at 360 characters; edit it in the
+release PR when a shorter editorial summary is clearer.
+
+For a dated target, `release-kit check` refuses a candidate with unreleased
+fragments, even if its current version was announced before. Run it before the
+release candidate's full verification. Cut and commit notes before qualifying
+the candidate; never change notes or versions on a verified deployment target.
+
+Each file has front matter (`version`, `commit`, `releasedAt`, `summary`) and
+the complete Markdown body. `writeDatedReleaseNotes(directory, record)` creates
+the same format for apps that publish dated updates without a semver cut.
+Commit notes through the repository's normal PR path. Runtime reads never write.
+
+`createFileReleaseNotesReader({ directory, repository, product })` provides
+`list(repository, { page, pageSize })` and `get(repository, id)`. It reads the
+deployed checkout, ignores readmes and unreleased drafts, refuses malformed
+files and symlinks, and returns deterministic newest-first history. For static
+hosts, `readDatedReleaseNotes` builds the same data at build time. Apps own the
+API and must require a live session for both list and detail, allowing every
+signed-in user regardless of role. Expose the page outside `/admin`, using
+admin-kit's `ReleaseNotesPanel`, and preserve a detail link through sign-in.
+
+`buildReleaseNotification(record, notesBaseUrl)` returns only
+`{ title, summary, url }` for any webhook transport. For Discord, wire
+`announceDatedReleaseToDiscord({ config, event })` into the deployed app's
+delivery hook. It accepts only a successful deployment, reads the latest dated
+file from that checkout, posts a short summary plus the full-notes link, and
+records that dated release ID in the announce-once ledger. It uses the file's
+summary with no AI API call. Only `DISCORD_RELEASE_WEBHOOK` is used; missing
+configuration skips the announcement. Set `RELEASE_ANNOUNCE_STATE` to durable
+host storage. The generic deployment delivery-event payload stays unchanged.
+
+`buildDiscordReleasePayload` also caps summaries at 360 characters and no
+longer embeds the full work groups. Supply `releaseUrl` to include the link;
+the optional field remains compatible with older callers during migration.
+
 ## Notes targets
 
 Where a cut writes its notes is a pluggable seam. `config.notesTarget` selects
@@ -382,8 +426,8 @@ Anthropic adapter defaults to `claude-haiku-4-5`; pass `{ model }` or
 `{ maxTokens }` when creating it to override those defaults. It calls the
 Messages API directly with no runtime SDK dependency.
 
-The announcement contains the AI-written overview plus release items grouped
-under the configured headings. Discord limits are enforced, release-item text
+The announcement contains a short AI-written overview and the full-notes link.
+Detailed change groups stay on the notes page. Discord limits are enforced, release-item text
 is marked as untrusted in the model prompt, and webhook URLs must be HTTPS
 Discord webhook endpoints. Keep the webhook and model credential in the
 consumer's secret store; they do not belong in `ReleaseKitConfig`.

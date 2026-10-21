@@ -123,6 +123,8 @@ export interface ReleaseKitConfig {
    * `PATCH_NOTES.md` index) when omitted — existing configs are unaffected.
    */
   notesTarget?: ReleaseNotesTarget;
+  /** Opt in to dated Git-backed notes and short announcements linking to the signed-in app page. */
+  history?: { repository: string; notesBaseUrl: string };
 }
 
 /** Identity helper for type inference/IDE support when authoring a config file. */
@@ -140,7 +142,7 @@ export interface ResolvedPaths {
 }
 
 /** Resolves a config's logical paths against its (possibly relative) `rootDir`. */
-export function resolvePaths(config: ReleaseKitConfig): ResolvedPaths {
+export function resolvePaths(config: Pick<ReleaseKitConfig, 'rootDir' | 'paths'>): ResolvedPaths {
   const rootDir = path.resolve(config.rootDir);
   const notesDir = path.join(rootDir, config.paths.notesDir);
   return {

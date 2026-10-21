@@ -19,6 +19,9 @@ export interface DiscordEmbedField {
     inline: false;
 }
 export interface DiscordReleasePayload {
+    allowed_mentions?: {
+        parse: [];
+    };
     username?: string;
     avatar_url?: string;
     embeds: Array<{
@@ -79,6 +82,6 @@ export interface ReleaseAnnouncementSkipped {
 export type ReleaseAnnouncementResult = ReleaseAnnouncementPosted | ReleaseAnnouncementSkipped;
 export declare function buildAiReleaseSummaryPrompt(config: ReleaseKitConfig, work: ReleaseWorkSummary, options: Pick<GenerateAiReleaseSummaryOptions, 'version' | 'audience' | 'maxCharacters'>): AiReleaseSummaryRequest;
 export declare function generateAiReleaseSummary(config: ReleaseKitConfig, work: ReleaseWorkSummary, options: GenerateAiReleaseSummaryOptions): Promise<string>;
-export declare function buildDiscordReleasePayload(config: ReleaseKitConfig, work: ReleaseWorkSummary, options: BuildDiscordReleasePayloadOptions): DiscordReleasePayload;
+export declare function buildDiscordReleasePayload(config: Pick<ReleaseKitConfig, 'productName'>, _work: ReleaseWorkSummary, options: BuildDiscordReleasePayloadOptions): DiscordReleasePayload;
 export declare function postReleaseToDiscord(options: PostReleaseToDiscordOptions): Promise<void>;
 export declare function announceReleaseToDiscord(options: AnnounceReleaseToDiscordOptions): Promise<ReleaseAnnouncementResult>;

@@ -43,7 +43,7 @@ export interface AnnouncedVersionsFile {
  * layout convention, only if that directory actually exists), and finally a
  * fallback file inside `rootDir` itself.
  */
-export declare function resolveAnnouncementStatePath(config: ReleaseKitConfig, options?: ResolveAnnouncementStatePathOptions): AnnouncementStatePathResolution;
+export declare function resolveAnnouncementStatePath(config: Pick<ReleaseKitConfig, 'rootDir' | 'paths'>, options?: ResolveAnnouncementStatePathOptions): AnnouncementStatePathResolution;
 /**
  * Reads the announce-once ledger. Never throws: a missing file, an empty
  * file, unparseable JSON, or JSON with junk in place of `announced` all
