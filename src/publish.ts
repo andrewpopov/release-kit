@@ -246,6 +246,21 @@ export interface ValidateReleaseStateResult {
   version: string;
 }
 
+/**
+ * package.json keys that make npm's pacote (lib/git.js `#prepareDir`) run a
+ * full `npm install`, devDependencies included, inside a git-cloned dependency.
+ */
+export const GIT_INSTALL_TRIGGERS = ['prepare', 'build', 'prepack', 'install', 'preinstall', 'postinstall'] as const;
+
+function validateGitInstallable(rootDir: string): string[] {
+  const manifest = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8')) as { scripts?: Record<string, string>; workspaces?: unknown };
+  const offending = [
+    ...GIT_INSTALL_TRIGGERS.filter((name) => manifest.scripts && name in manifest.scripts).map((name) => `scripts.${name}`),
+    ...('workspaces' in manifest ? ['workspaces'] : []),
+  ];
+  return offending.map((key) => `package.json ${key} makes npm install every dependency (dev included) when this package is installed from git; ${key === 'workspaces' ? 'remove it' : 'rename it (e.g. "compile")'}`);
+}
+
 export function validateReleaseState(config: ReleaseKitConfig, explicitVersion = ''): ValidateReleaseStateResult {
   const errors: string[] = [];
   const rootDir = path.resolve(config.rootDir);
@@ -259,6 +274,7 @@ export function validateReleaseState(config: ReleaseKitConfig, explicitVersion =
   }
   tryStep(errors, () => collectFragments(config), []);
   errors.push(...resolveNotesTarget(config).validate(config, version));
+  if (config.installFromGit) errors.push(...tryStep(errors, () => validateGitInstallable(rootDir), []));
   return { ok: errors.length === 0, errors, version };
 }
 

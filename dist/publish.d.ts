@@ -79,6 +79,11 @@ export interface ValidateReleaseStateResult {
     errors: string[];
     version: string;
 }
+/**
+ * package.json keys that make npm's pacote (lib/git.js `#prepareDir`) run a
+ * full `npm install`, devDependencies included, inside a git-cloned dependency.
+ */
+export declare const GIT_INSTALL_TRIGGERS: readonly ["prepare", "build", "prepack", "install", "preinstall", "postinstall"];
 export declare function validateReleaseState(config: ReleaseKitConfig, explicitVersion?: string): ValidateReleaseStateResult;
 export interface CutReleaseOptions {
     version?: string;

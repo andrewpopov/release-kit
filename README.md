@@ -327,6 +327,17 @@ they can never drift apart — the test suite proves a package configured
 with `productName: "Angel Snack"` parses rouge's real historical release
 files unchanged.
 
+### `installFromGit`
+
+Set `installFromGit: true` in the config to make `release:check` fail when
+`package.json` would make npm run a full install (devDependencies included)
+inside this package whenever a consumer installs it from a `github:` pin.
+npm's pacote does that for any of `scripts.prepare`, `scripts.build`,
+`scripts.prepack`, `scripts.install`, `scripts.preinstall`,
+`scripts.postinstall`, or a `workspaces` field (the list is exported as
+`GIT_INSTALL_TRIGGERS` in `publish.ts`). Rename the script (e.g. `compile`)
+and commit `dist/`. Off by default.
+
 ### `VersionStrategy`
 
 ```ts
@@ -558,6 +569,7 @@ MIT © Andrew Popov
 
 ```bash
 npm ci
+npm run hooks # once after cloning: enables the pre-push gate
 npm run verify
 ```
 

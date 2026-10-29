@@ -117,6 +117,12 @@ export interface ReleaseKitConfig {
      * `PATCH_NOTES.md` index) when omitted — existing configs are unaffected.
      */
     notesTarget?: ReleaseNotesTarget;
+    /**
+     * Opt in to the `release:check` rule that rejects `package.json` keys which
+     * make npm run a full dependency install when the package is installed from
+     * a `github:` pin (see `GIT_INSTALL_TRIGGERS` in `publish.ts`).
+     */
+    installFromGit?: boolean;
     /** Opt in to dated Git-backed notes and short announcements linking to the signed-in app page. */
     history?: {
         repository: string;

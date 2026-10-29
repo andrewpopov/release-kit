@@ -10,7 +10,7 @@ hosted CI checks. The CHANGELOG and version bump are produced by
 > depend on itself. Every `release:*` script below invokes the local CLI
 > directly (`node dist/cli.js <verb>`) for the same reason — npm does not
 > link a package's own `bin` into its own `node_modules`. This means
-> `npm run build` must be current before running `release:cut`; the committed
+> `npm run compile` must be current before running `release:cut`; the committed
 > `dist/` normally satisfies that, and `verify:dist-fresh` (below) guards
 > against a stale one slipping through.
 

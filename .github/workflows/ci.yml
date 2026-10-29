@@ -26,7 +26,7 @@ jobs:
       - run: npm run verify:pack
       - name: Dist freshness (committed dist/ must match src/)
         run: |
-          npm run build
+          npm run compile
           git diff --exit-code dist
 
   # Non-required forward-compat leg. Kept out of the `test` context name on
@@ -63,7 +63,7 @@ jobs:
   # Advisory only: reports fragment/hygiene status on PRs but never blocks a
   # merge. Not part of ci-success's `needs` and not a required status check —
   # continue-on-error means a failing hygiene check shows as a warning icon,
-  # not a red X. Runs `npm run build` first because release-kit.config.js
+  # not a red X. Runs `npm run compile` first because release-kit.config.js
   # self-references `./dist/index.js` (release-kit cannot depend on itself).
   release-hygiene:
     runs-on: ubuntu-latest
@@ -77,7 +77,7 @@ jobs:
           node-version: '20'
           cache: npm
       - run: npm ci
-      - run: npm run build
+      - run: npm run compile
       - run: npm run release:hygiene -- --base origin/master
 
   release-guard:
