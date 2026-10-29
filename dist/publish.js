@@ -13,7 +13,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.collectFragments = void 0;
+exports.GIT_INSTALL_TRIGGERS = exports.collectFragments = void 0;
 exports.tryStep = tryStep;
 exports.resolveNotesTarget = resolveNotesTarget;
 exports.resolveVersion = resolveVersion;
@@ -197,6 +197,19 @@ function publishReleaseWithFragments(config, options, fragmentsOverride) {
 function publishRelease(config, options = {}) {
     return publishReleaseWithFragments(config, options);
 }
+/**
+ * package.json keys that make npm's pacote (lib/git.js `#prepareDir`) run a
+ * full `npm install`, devDependencies included, inside a git-cloned dependency.
+ */
+exports.GIT_INSTALL_TRIGGERS = ['prepare', 'build', 'prepack', 'install', 'preinstall', 'postinstall'];
+function validateGitInstallable(rootDir) {
+    const manifest = JSON.parse(node_fs_1.default.readFileSync(node_path_1.default.join(rootDir, 'package.json'), 'utf8'));
+    const offending = [
+        ...exports.GIT_INSTALL_TRIGGERS.filter((name) => manifest.scripts && name in manifest.scripts).map((name) => `scripts.${name}`),
+        ...('workspaces' in manifest ? ['workspaces'] : []),
+    ];
+    return offending.map((key) => `package.json ${key} makes npm install every dependency (dev included) when this package is installed from git; ${key === 'workspaces' ? 'remove it' : 'rename it (e.g. "compile")'}`);
+}
 function validateReleaseState(config, explicitVersion = '') {
     const errors = [];
     const rootDir = node_path_1.default.resolve(config.rootDir);
@@ -210,6 +223,8 @@ function validateReleaseState(config, explicitVersion = '') {
     }
     tryStep(errors, () => (0, fragments_1.collectFragments)(config), []);
     errors.push(...resolveNotesTarget(config).validate(config, version));
+    if (config.installFromGit)
+        errors.push(...tryStep(errors, () => validateGitInstallable(rootDir), []));
     return { ok: errors.length === 0, errors, version };
 }
 /**
