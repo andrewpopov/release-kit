@@ -17,6 +17,11 @@ CHANGELOG entry.
 
 ---
 
+## 0.7.1
+
+- Packages installed from git no longer trigger a full dependency install
+  `prepare` is gone (use `npm run hooks`), `build` is now `compile`, and `release:check` gains the opt-in `installFromGit` rule.
+
 ## 0.7.0
 
 - Dated Git-backed release history and concise linked announcements
